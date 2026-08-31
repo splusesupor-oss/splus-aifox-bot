@@ -93,7 +93,13 @@ def api_call(method, params=None):
     except Exception:
         raise BotError(status or -1, f"پاسخ غیر-JSON (HTTP {status})")
 
-    if payload.get("OK") is True:
+    # Soroush Plus returns {"ok": true, ...} — accept any key case
+    ok_value = None
+    for key, value in payload.items():
+        if str(key).lower() == "ok":
+            ok_value = value
+            break
+    if ok_value is True:
         return payload.get("result")
 
     error_params = payload.get("parameters") or {}
