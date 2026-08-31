@@ -805,8 +805,10 @@ def handle_deadline_link(message, user_id):
 
     key = resolve_group_key(candidates, expiry)
     if key is None:
-        log("warn", f"مهلت گروه: هیچ کلیدی با {candidates} مطابقت ندارد "
-                    f"— user {user_id} (file: {path})")
+        sample_keys = list(expiry.keys())[:3]
+        log("warn", f"مهلت گروه: تطبیق نشد — candidates={candidates} | "
+                    f"کلیدهای نمونهٔ فایل: {sample_keys} | user {user_id} "
+                    f"(file: {path})")
         send_with_retry(user_id, "❌ این گروه در سیستم ثبت نشده است.")
         show_main_menu(user_id)
         return
