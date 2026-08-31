@@ -17,9 +17,12 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۳: سایت بازی روباه | کانال راهنما
   4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
-  5. مهلت باقی‌ماندهٔ گروه -> فعلاً پیام «منبع اشتراک متصل نشده»
-     (در پروژه منبع اشتراک/تاریخ انقضا وجود ندارد؛ دادهٔ جعلی ساخته
-     نمی‌شود؛ ساختار handler آمادهٔ اتصال منبع آینده است)
+  5. مهلت باقی‌ماندهٔ گروه: کاربر لینک گروهش را می‌فرستد؛ کلیدهای
+     فایل زندهٔ ربات اصلی group_expiry.json (READ-ONLY، مسیر از
+     config.json) با توکن لینک تطبیق می‌شود و از expires_at زمان
+     باقی‌مانده محاسبه می‌شود. اگر فایل از محیط اجرا قابل دسترسی نباشد،
+     دقیقاً همین را اعلام می‌کند (حدس نمی‌زند). این reader منبع مشترک
+     «مهلت» و «تمدید اشتراک» آینده است.
   6. سایت بازی روباه -> عکس + دکمهٔ inline URL
   7. کانال راهنما -> دکمهٔ inline URL
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
@@ -36,6 +39,7 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -124,12 +128,16 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-DEADLINE_TEXT = (
-    "⏳ مهلت باقی‌مانده گروه\n\n"
-    "ℹ️ هنوز منبع اشتراک (گروه‌های ثبت‌شده و تاریخ انقضا) به این ربات "
-    "متصل نشده است.\n"
-    "به‌زودی: لینک گروه خود را بفرستید تا مهلت باقی‌ماندهٔ آن را همین‌جا "
-    "ببینید."
+DEADLINE_ASK_TEXT = (
+    "🔗 لطفاً لینک گروه خود را ارسال کنید تا مهلت باقی‌ماندهٔ اشتراک "
+    "آن را بررسی کنم.\n"
+    "(برای لغو، «انصراف» بفرستید)"
+)
+DEADLINE_NOT_FOUND_FILE_TEXT = (
+    "⚠️ فایل اطلاعات اشتراک از این محیط قابل خواندن نیست (READ-ONLY):\n"
+    "{path}\n"
+    "این ربات باید روی همان دستگاهی اجرا شود که ربات اصلی روی آن فعال "
+    "است تا به فایل زندهٔ آن دسترسی داشته باشد."
 )
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
@@ -145,6 +153,7 @@ DEFAULT_CONFIG = {
     "site_url": "https://fox-bot.aifox-chat.workers.dev",
     "game_site_url": "https://fox-game.aifox-chat.workers.dev",
     "guide_channel_url": "https://splus.ir/Plunfox",
+    "group_expiry_file": "~/.local/share/soroush-bot/config/group_expiry.json",
 }
 
 CFG = dict(DEFAULT_CONFIG)
@@ -622,18 +631,202 @@ def send_guide_channel(user_id):
     log("info", f"دکمهٔ کانال راهنما ارسال شد — user {user_id}")
 
 
-def handle_group_deadline(user_id):
-    """«⏳ مهلت باقی‌مانده گروه»
+# ---------------------------------------------------------------------------
+# دادهٔ اشتراک: reader مشترک (READ-ONLY) برای «مهلت» و «تمدید» آینده
+# ---------------------------------------------------------------------------
 
-    بررسی اولیهٔ پروژه: هیچ منبع اشتراک، گروه ثبت‌شده یا تاریخ انقضا
-    در این پروژه وجود ندارد (فقط pv_state و config). طبق دستور، دادهٔ
-    جعلی یا سیستم موازی ساخته نمی‌شود؛ فقط پیام راست می‌دهیم.
-    وقتی منبع معتبر (مثلاً دیتابیس اشتراک) متصل شد، همین تابع جای
-    اتصال آن است: ارسال لینک گروه توسط کاربر -> پیدا کردن رکورد
-    اشتراک -> نمایش تاریخ انقضا.
+def group_expiry_path():
+    """مسیر فایل زندهٔ ربات اصلی — از config.json (قابل تغییر بدون کد)."""
+    raw = str(CFG.get("group_expiry_file")
+              or "~/.local/share/soroush-bot/config/group_expiry.json")
+    return os.path.expanduser(raw)
+
+
+def load_group_expiry():
+    """فقط READ: خواندن group_expiry.json (group_id -> expires_at).
+
+    برمی‌گرداند (data, path, error):
+      error=None -> data دیکشنوری معتبر است
+      error='not-found' | 'invalid' | 'error: ...'
+    هیچ تغییری در فایل اعمال نمی‌شود.
     """
-    send_with_retry(user_id, DEADLINE_TEXT)
-    log("info", f"پیام مهلت باقی‌مانده ارسال شد (منبع متصل نیست) — user {user_id}")
+    path = group_expiry_path()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return None, path, "not-found"
+    except Exception as exc:
+        return None, path, f"error: {exc}"
+    if not isinstance(data, dict) or not data:
+        return None, path, "invalid"
+    return data, path, None
+
+
+def parse_expiry(value):
+    """expires_at را (epoch/ISO/تاریخ رایج) به datetime محلی تبدیل می‌کند.
+    اگر هیچ فرمت شناخته‌شده‌ای نباشد، None برمی‌گرداند (حدس نمی‌زند)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e12:  # epoch میلی‌ثانیه
+            ts /= 1000.0
+        try:
+            return datetime.fromtimestamp(ts)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if s.lstrip("-").isdigit():
+            return parse_expiry(int(s))
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone().replace(tzinfo=None)
+            return dt
+        except Exception:
+            pass
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S",
+                    "%Y/%m/%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                continue
+    return None
+
+
+FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def fa(num):
+    return str(num).translate(FA_DIGITS)
+
+
+def format_remaining(total_seconds):
+    total_minutes = max(int(round(total_seconds / 60.0)), 1)
+    days, rem = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rem, 60)
+    if days > 0:
+        return f"{fa(days)} روز و {fa(hours)} ساعت"
+    if hours > 0:
+        return f"{fa(hours)} ساعت و {fa(minutes)} دقیقه"
+    return f"{fa(minutes)} دقیقه"
+
+
+def deadline_candidates(text):
+    """توکن‌های قابل‌تطبیق از متن کاربر: پادشالک URLs + ایدهای خام."""
+    candidates = []
+    for url in re.findall(r"https?://[^\s]+", text):
+        tail = url.split("://", 1)[-1]
+        segments = [seg for seg in tail.split("/") if seg]
+        token = segments[-1].strip().lower() if segments else ""
+        if token and token not in candidates:
+            candidates.append(token)
+    for num in re.findall(r"(?<!\d)-?\d{5,}(?!\d)", text):
+        if num not in candidates:
+            candidates.append(num)
+    return candidates
+
+
+def resolve_group_key(candidates, expiry):
+    """اولین کلید فایل که با یکی از توکن‌ها مطابقت دارد (وگرنه None).
+
+    سطوح تطبیق: ۱) معادل دقیق کلید  ۲) معادل عددی کلید  ۳) کلیدهای
+    URL-کامل (توکن داخل کلید). اگر کلیدهای فایل فرمت دیگری دارند،
+    فقط همین تابع جای اصلاح است.
+    """
+    for cand in candidates:
+        if cand in expiry:
+            return cand
+    for cand in candidates:
+        if cand.lstrip("-").isdigit():
+            for key in expiry:
+                if str(key).strip().lstrip("-").isdigit() and \
+                        int(str(key).strip().lstrip("-")) == int(cand.lstrip("-")):
+                    return key
+    for cand in candidates:
+        for key in expiry:
+            if cand and cand in str(key).lower():
+                return key
+    return None
+
+
+def handle_group_deadline(user_id):
+    """کلیک «⏳ مهلت باقی‌مانده گروه» -> درخواست لینک گروه."""
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "deadline"
+    save_state()
+    send_with_retry(user_id, DEADLINE_ASK_TEXT)
+
+
+def handle_deadline_link(message, user_id):
+    """لینک گروه -> خواندن READ-ONLY فایل -> نمایش وضعیت اشتراک."""
+    user_state = get_user_state(user_id)
+    text = (message.get("text") or "").strip()
+
+    if not text:
+        user_state["mode"] = "deadline"
+        save_state()
+        send_with_retry(user_id, DEADLINE_ASK_TEXT)
+        return
+
+    if text in ("انصراف", "لغو", "/cancel"):
+        user_state["mode"] = "main"
+        save_state()
+        show_main_menu(user_id)
+        return
+
+    candidates = deadline_candidates(text)
+    if not candidates:
+        # متنی بدون لینک/اید: دوباره لینک بخواهیم
+        user_state["mode"] = "deadline"
+        save_state()
+        send_with_retry(user_id, DEADLINE_ASK_TEXT)
+        return
+
+    user_state["mode"] = "main"
+    save_state()
+
+    expiry, path, err = load_group_expiry()
+    if err == "not-found":
+        log("warn", f"group_expiry.json پیدا نشد: {path}")
+        send_with_retry(user_id,
+                        DEADLINE_NOT_FOUND_FILE_TEXT.format(path=path))
+        show_main_menu(user_id)
+        return
+    if err:
+        log("error", f"خواندن group_expiry ناموفق: {err} ({path})")
+        send_with_retry(user_id, f"⚠️ خواندن فایل اطلاعات اشتراک ناموفق بود:\n{err}")
+        show_main_menu(user_id)
+        return
+
+    key = resolve_group_key(candidates, expiry)
+    if key is None:
+        log("warn", f"مهلت گروه: هیچ کلیدی با {candidates} مطابقت ندارد "
+                    f"— user {user_id} (file: {path})")
+        send_with_retry(user_id, "❌ این گروه در سیستم ثبت نشده است.")
+        show_main_menu(user_id)
+        return
+
+    dt = parse_expiry(expiry.get(key))
+    if dt is None:
+        log("error", f"expires_at گروه {key} قابل خواندن نیست: "
+                     f"{expiry.get(key)!r}")
+        send_with_retry(user_id, "⚠️ تاریخ انقضای این گروه قابل خواندن نیست.")
+        show_main_menu(user_id)
+        return
+
+    remaining = (dt - datetime.now()).total_seconds()
+    if remaining <= 0:
+        send_with_retry(user_id, "⛔ اشتراک این گروه به پایان رسیده است.")
+    else:
+        send_with_retry(user_id,
+                        f"⏳ مهلت باقی‌مانده: {format_remaining(remaining)}")
+        log("info", f"مهلت گروه {key}: {format_remaining(remaining)} — user {user_id}")
+    show_main_menu(user_id)
 
 
 def handle_menu_text(user_id, text):
@@ -699,6 +892,8 @@ def handle_update(update):
     if is_start_message(message):
         user_state = get_user_state(user_id)
         if user_state["verified"]:
+            user_state["mode"] = "main"
+            save_state()
             show_main_menu(user_id)
         else:
             user_state["mode"] = "proof"
@@ -721,6 +916,13 @@ def handle_update(update):
             handle_report(message, user_id)
         except (NetworkError, BotError) as exc:
             log("error", f"خطا در ثبت گزارش: {exc}")
+        return
+
+    if user_state.get("mode") == "deadline":
+        try:
+            handle_deadline_link(message, user_id)
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در بررسی مهلت گروه: {exc}")
         return
 
     if not user_state.get("verified"):
