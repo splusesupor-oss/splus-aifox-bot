@@ -4,23 +4,28 @@
 AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
 ====================================================
 قابلیت‌ها (فقط در PV):
-  1. /start -> عکس خوش‌آمد + متن عضویت + لینک‌های واقعیِ قابل‌کلیک در
-     زیرعنوان همان پیام + دکمه‌های کانال/گروه + دکمه «✅ تایید عضویت»
-  2. تایید عضویت بر اساس کلیک روی دکمه‌ها (طبق خواست مالک):
-     تا کاربر روی هر دو دکمه «کانال روباه» و «گروه روباه» کلیک نکرده
-     باشد، «تایید عضویت» او را فعال نمی‌کند.
-     (توضیح فنی: Bot API کلیک روی دکمه‌های لینک/URL را به سرور گزارش
-     نمی‌کند؛ برای همین دکمه‌ها callback هستند و با هر کلیک فقط ثبت
-     می‌شود — هیچ پیام جدا ارسال نمی‌شود. برای ورود به کانال/گروه،
-     لینک‌های واقعی داخل همان پیام شروع (زیرعنوان عکس) قرار دارد.)
-  3. منوی اصلی (Reply Keyboard در پایین چت):
-     خرید ربات / ارسال گزارش به پشتیبانی / تمدید اشتراک
-  3b. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
+  1. /start -> عکس خوش‌آمد + متن عضویت + دکمه‌های «کانال روباه» و
+     «گروه روباه» (دکمه‌های URL: با کلیک مستقیم داخل کانال/گروه می‌رود)
+     + دکمه «✅ تایید عضویت»
+  2. تایید عضویت: Bot API کلیک روی دکمه‌های لینک را به سرور گزارش
+     نمی‌کند؛ کاربر بعد از وارد شدن به کانال/گروه، وقتی برگشت روی
+     «✅ تایید عضویت» می‌زند، تأیید می‌شود و همان لحظه پنل کیبورد
+     اصلی در همان پیام نمایش داده می‌شود.
+  3. منوی اصلی (Reply Keyboard در پایین چت، ۲ دکمه در هر ردیف):
+     ردیف ۱: خرید ربات | ارسال گزارش به پشتیبانی
+     ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
+     ردیف ۳: سایت بازی روباه | کانال راهنما
+  4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
-  4. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
+  5. مهلت باقی‌ماندهٔ گروه -> فعلاً پیام «منبع اشتراک متصل نشده»
+     (در پروژه منبع اشتراک/تاریخ انقضا وجود ندارد؛ دادهٔ جعلی ساخته
+     نمی‌شود؛ ساختار handler آمادهٔ اتصال منبع آینده است)
+  6. سایت بازی روباه -> عکس + دکمهٔ inline URL
+  7. کانال راهنما -> دکمهٔ inline URL
+  8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
-  5. تمدید اشتراک -> هدایت به صفحهٔ خرید/تمدید سایت.
+  9. تمدید اشتراک -> هدایت به صفحهٔ خرید/تمدید سایت.
 
 زیرساخت:
   * getUpdates با Long Polling — بدون Webhook
@@ -62,16 +67,17 @@ CONFIG_FILE = BASE_DIR / "config.json"
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "pv_state.json"
 WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
+GAME_PHOTO = BASE_DIR / "assets" / "game_site.jpg"
 
-START_CAPTION_BASE = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
+START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
 
 VERIFY_CALLBACK = "verify_membership"
-VISIT_CHANNEL_CALLBACK = "visit_channel"
-VISIT_GROUP_CALLBACK = "visit_group"
 MENU_BUY = "🦊 خرید ربات روباه"
 MENU_REPORT = "🎧 ارسال گزارش به پشتیبانی"
 MENU_EXTEND = "🔄 تمدید اشتراک ربات"
-MAIN_MENU_BUTTONS = (MENU_BUY, MENU_REPORT, MENU_EXTEND)
+MENU_DEADLINE = "⏳ مهلت باقی‌مانده گروه"
+MENU_GAME = "🎮 سایت بازی روباه"
+MENU_GUIDE = "📚 کانال راهنما"
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 
 PURCHASE_MAIN_HTML = (
@@ -118,7 +124,15 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-VISIT_DONE_TEXT = "ثبت شد ✅"
+DEADLINE_TEXT = (
+    "⏳ مهلت باقی‌مانده گروه\n\n"
+    "ℹ️ هنوز منبع اشتراک (گروه‌های ثبت‌شده و تاریخ انقضا) به این ربات "
+    "متصل نشده است.\n"
+    "به‌زودی: لینک گروه خود را بفرستید تا مهلت باقی‌ماندهٔ آن را همین‌جا "
+    "ببینید."
+)
+GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
+GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
@@ -129,6 +143,8 @@ DEFAULT_CONFIG = {
     "group_title": "گروه روباه",
     "support_username": "osine2",
     "site_url": "https://fox-bot.aifox-chat.workers.dev",
+    "game_site_url": "https://fox-game.aifox-chat.workers.dev",
+    "guide_channel_url": "https://splus.ir/Plunfox",
 }
 
 CFG = dict(DEFAULT_CONFIG)
@@ -365,15 +381,8 @@ def get_user_state(user_id):
     key = str(user_id)
     record = STATE["users"].get(key)
     if not isinstance(record, dict):
-        record = {"verified": False, "channel_clicked": False,
-                  "group_clicked": False, "mode": "proof"}
+        record = {"verified": False, "mode": "proof"}
         STATE["users"][key] = record
-        return record
-    # سازگاری با وضعیت‌های نسخهٔ قبل (کلیک‌های ثبت‌شده به‌شمار می‌روند)
-    if "channel_clicked" not in record:
-        record["channel_clicked"] = bool(record.get("channel_ok"))
-    if "group_clicked" not in record:
-        record["group_clicked"] = bool(record.get("group_ok"))
     return record
 
 
@@ -394,16 +403,25 @@ def is_start_message(message):
 # ---------------------------------------------------------------------------
 
 def start_inline_keyboard():
+    """دکمه‌های کانال/گروه URL هستند: با کلیک مستقیم داخل چت می‌روند.
+
+    (Bot API کلیک روی دکمهٔ URL را گزارش نمی‌کند؛ به همین دلیل دکمهٔ
+    جداگانهٔ «تایید عضویت» callback است و بعد از برگشت کاربر زده می‌شود.)
+    """
     return {"inline_keyboard": [
-        [{"text": "🔹 کانال روباه", "callback_data": VISIT_CHANNEL_CALLBACK}],
-        [{"text": "🔹 گروه روباه", "callback_data": VISIT_GROUP_CALLBACK}],
+        [{"text": "🔹 کانال روباه", "url": CFG["channel_url"]}],
+        [{"text": "🔹 گروه روباه", "url": CFG["group_url"]}],
         [{"text": "✅ تایید عضویت", "callback_data": VERIFY_CALLBACK}],
     ]}
 
 
 def main_reply_keyboard():
-    return {"keyboard": [[label] for label in MAIN_MENU_BUTTONS],
-            "resize_keyboard": True}
+    """۲ دکمه در هر ردیف، ۳ ردیف (مطابق چیدمان خواسته‌شده)."""
+    return {"keyboard": [
+        [MENU_BUY, MENU_REPORT],
+        [MENU_EXTEND, MENU_DEADLINE],
+        [MENU_GAME, MENU_GUIDE],
+    ], "resize_keyboard": True}
 
 
 def site_inline_keyboard():
@@ -416,24 +434,14 @@ def site_inline_keyboard():
 # صفحهٔ شروع
 # ---------------------------------------------------------------------------
 
-def start_caption():
-    """متن زیر عکس + لینک‌های واقعیِ قابل‌کلیک (داخل همان پیام شروع)."""
-    return (
-        f"{START_CAPTION_BASE}\n\n"
-        f"🔹 کانال روباه: {CFG['channel_url']}\n"
-        f"🔹 گروه روباه: {CFG['group_url']}"
-    )
-
-
 def send_start_page(user_id):
     keyboard = start_inline_keyboard()
-    caption = start_caption()
     if WELCOME_PHOTO.exists():
         try:
             data = WELCOME_PHOTO.read_bytes()
             fields = [
                 ("chat_id", str(user_id)),
-                ("caption", caption),
+                ("caption", START_CAPTION),
                 ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
             ]
             api_call_multipart(
@@ -447,7 +455,7 @@ def send_start_page(user_id):
         except BotError as exc:
             log("error", f"sendPhoto خطا داد: {exc} — ارسال بدون عکس")
     # جایگزین بدون عکس (فایل عکس موجود نیست یا ارسال شکست)
-    send_with_retry(user_id, caption, reply_markup=keyboard)
+    send_with_retry(user_id, START_CAPTION, reply_markup=keyboard)
     log("info", f"صفحهٔ شروع (متنی) ارسال شد — chat {user_id}")
 
 
@@ -461,22 +469,12 @@ def show_main_menu(user_id, note=None):
 # ---------------------------------------------------------------------------
 
 def click_status_text(user_state):
-    lines = [
-        "🔍 برای فعال‌سازی، باید روی هر دو دکمهٔ «کانال روباه» و "
-        "«گروه روباه» کلیک کنید.",
-        "",
-    ]
-    if user_state["channel_clicked"]:
-        lines.append("✅ کانال روباه: کلیک ثبت شد")
-    else:
-        lines.append("⬜ کانال روباه: هنوز کلیک نشده")
-    if user_state["group_clicked"]:
-        lines.append("✅ گروه روباه: کلیک ثبت شد")
-    else:
-        lines.append("⬜ گروه روباه: هنوز کلیک نشده")
-    lines.append("")
-    lines.append("روی دکمه‌های باقی‌مانده در پیام شروع بزنید و بعد «✅ تایید عضویت» را دوباره بزنید.")
-    return "\n".join(lines)
+    return (
+        "🔍 برای فعال‌سازی:\n"
+        "۱. روی «🔹 کانال روباه» بزنید و وارد کانال شوید\n"
+        "۲. روی «🔹 گروه روباه» بزنید و وارد گروه شوید\n"
+        "۳. وقتی برگشتید، «✅ تایید عضویت» را بزنید تا ربات فعال شود"
+    )
 
 
 def finish_verification(user_id, user_state):
@@ -488,38 +486,14 @@ def finish_verification(user_id, user_state):
 
 
 def handle_unverified_message(message, user_id):
-    """کاربر هنوز تایید نشده: فقط با کلیک روی دکمه‌ها پیش می‌رود."""
-    user_state = get_user_state(user_id)
-    send_with_retry(user_id, click_status_text(user_state))
-
-
-def handle_visit_callback(callback, kind):
-    """کلیک روی دکمهٔ کانال/گروه: فقط ثبت کلیک (بدون ارسال پیام جدا).
-
-    لینک‌های واقعیِ قابل‌کلیک در همان پیام شروع (زیرعنوان عکس) هست؛
-    دکمه‌ها callback هستند چون Bot API کلیک روی دکمهٔ URL را گزارش نمی‌کند.
-    """
-    user = callback.get("from") or {}
-    user_id = user.get("id")
-    if user_id is None:
-        return
-    user_state = get_user_state(user_id)
-    if kind == "channel":
-        user_state["channel_clicked"] = True
-    else:
-        user_state["group_clicked"] = True
-    save_state()
-    try:
-        api_call("answerCallbackQuery", {
-            "callback_query_id": callback.get("id"),
-            "text": VISIT_DONE_TEXT,
-        })
-    except (NetworkError, BotError) as exc:
-        log("warn", f"answerCallbackQuery ناموفق: {exc}")
-    log("info", f"کلیک {kind} ثبت شد — user {user_id}")
+    """کاربر هنوز تایید نشده: فقط با زدن دکمهٔ «تایید عضویت» پیش می‌رود."""
+    get_user_state(user_id)
+    send_with_retry(user_id, click_status_text(None))
 
 
 def handle_verify_callback(callback):
+    """کلیک «✅ تایید عضویت» (بعد از وارد شدن به کانال/گروه و برگشت):
+    تأیید فوری + نمایش پنل کیبورد در همان پیام."""
     user = callback.get("from") or {}
     user_id = user.get("id")
     if user_id is None:
@@ -532,14 +506,7 @@ def handle_verify_callback(callback):
     if user_state["verified"]:
         show_main_menu(user_id, note="✅ عضویت شما از قبل تأیید شده است.")
         return
-    if user_state["channel_clicked"] and user_state["group_clicked"]:
-        finish_verification(user_id, user_state)
-        return
-    # هنوز هر دو کلیک ثبت نشده -> تایید نمی‌شود
-    user_state["mode"] = "proof"
-    save_state()
-    send_with_retry(user_id, click_status_text(user_state))
-    log("info", f"درخواست تایید بدون کلیک کامل — user {user_id}")
+    finish_verification(user_id, user_state)
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +587,55 @@ def handle_report(message, user_id):
 # منوی اصلی
 # ---------------------------------------------------------------------------
 
+def send_game_site(user_id):
+    """عکس روباه + دستهٔ بازی + دکمهٔ inline URL سایت بازی."""
+    keyboard = {"inline_keyboard": [
+        [{"text": GAME_BUTTON_TEXT, "url": CFG["game_site_url"]}],
+    ]}
+    if GAME_PHOTO.exists():
+        try:
+            data = GAME_PHOTO.read_bytes()
+            fields = [
+                ("chat_id", str(user_id)),
+                ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+            ]
+            api_call_multipart(
+                "sendPhoto", fields,
+                [("photo", GAME_PHOTO.name, data, "image/jpeg")],
+            )
+            log("info", f"عکس + دکمهٔ سایت بازی ارسال شد — user {user_id}")
+            return
+        except NetworkError as exc:
+            log("warn", f"sendPhoto سایت بازی ناموفق ({exc}) — ارسال متنی")
+        except BotError as exc:
+            log("error", f"sendPhoto سایت بازی خطا داد: {exc} — ارسال متنی")
+    send_with_retry(user_id, GAME_BUTTON_TEXT, reply_markup=keyboard)
+
+
+def send_guide_channel(user_id):
+    """دکمهٔ inline URL کانال راهنما."""
+    keyboard = {"inline_keyboard": [
+        [{"text": GUIDE_BUTTON_TEXT, "url": CFG["guide_channel_url"]}],
+    ]}
+    send_with_retry(user_id, "📚 آموزش‌ها و راهنمای استفاده:\n",
+                    reply_markup=keyboard)
+    log("info", f"دکمهٔ کانال راهنما ارسال شد — user {user_id}")
+
+
+def handle_group_deadline(user_id):
+    """«⏳ مهلت باقی‌مانده گروه»
+
+    بررسی اولیهٔ پروژه: هیچ منبع اشتراک، گروه ثبت‌شده یا تاریخ انقضا
+    در این پروژه وجود ندارد (فقط pv_state و config). طبق دستور، دادهٔ
+    جعلی یا سیستم موازی ساخته نمی‌شود؛ فقط پیام راست می‌دهیم.
+    وقتی منبع معتبر (مثلاً دیتابیس اشتراک) متصل شد، همین تابع جای
+    اتصال آن است: ارسال لینک گروه توسط کاربر -> پیدا کردن رکورد
+    اشتراک -> نمایش تاریخ انقضا.
+    """
+    send_with_retry(user_id, DEADLINE_TEXT)
+    log("info", f"پیام مهلت باقی‌مانده ارسال شد (منبع متصل نیست) — user {user_id}")
+
+
 def handle_menu_text(user_id, text):
     if text == MENU_BUY:
         # پیام اصلی (HTML: فقط bold — تگ‌های غیرمستند مثل blockquote باعث
@@ -636,6 +652,12 @@ def handle_menu_text(user_id, text):
         send_with_retry(user_id, EXTEND_TEXT,
                         reply_markup=site_inline_keyboard())
         log("info", f"پیام تمدید ارسال شد — user {user_id}")
+    elif text == MENU_DEADLINE:
+        handle_group_deadline(user_id)
+    elif text == MENU_GAME:
+        send_game_site(user_id)
+    elif text == MENU_GUIDE:
+        send_guide_channel(user_id)
     else:
         # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
         show_main_menu(user_id)
@@ -650,17 +672,9 @@ def handle_update(update):
     message = update.get("message")
     if message is None:
         callback = update.get("callback_query")
-        data = callback.get("data") if callback else None
-        if data == VERIFY_CALLBACK:
+        if callback and callback.get("data") == VERIFY_CALLBACK:
             try:
                 handle_verify_callback(callback)
-            except (NetworkError, BotError) as exc:
-                log("error", f"خطا در callback: {exc}")
-        elif data in (VISIT_CHANNEL_CALLBACK, VISIT_GROUP_CALLBACK):
-            try:
-                handle_visit_callback(
-                    callback,
-                    "channel" if data == VISIT_CHANNEL_CALLBACK else "group")
             except (NetworkError, BotError) as exc:
                 log("error", f"خطا در callback: {exc}")
         return
