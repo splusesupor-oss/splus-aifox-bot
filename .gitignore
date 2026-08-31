@@ -1,0 +1,8 @@
+# وضعیت اجرایی و داده‌های کاربر (خارج از git)
+data/
+__pycache__/
+*.pyc
+# token / محیط
+splus.env
+*.env
+bot.log

@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AIFox — بات آزمایشی سروش‌پلاس (Bot API رسمی)
-================================================
-قابلیت (فعلاً فقط همین):
-    کاربر در PV دستور /start بفرستد  ->  پیام خوش‌آمدگویی.
+AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
+====================================================
+قابلیت‌ها (فقط در PV):
+  1. /start -> عکس خوش‌آمد + متن عضویت + دکمه‌های کانال/گروه (لینک واقعی)
+     + دکمه «✅ تایید عضویت»
+  2. بررسی واقعی عضویت با «اثبات فوروارد»: کاربر یک پیام از کانال و
+     گروه روباه را فوروارد می‌کند و ربات forward_from_chat واقعی (id /
+     username / title) را با مقادیر config تطبیق می‌دهد.
+     توضیح: Bot API مستند سروش‌پلاس متد جستجوی عضویت (مثل
+     getChatMember) ندارد؛ فوروارد، قوی‌ترین بررسی واقعیِ قابل
+     اجرا با متدهای مستند است. هیچ بررسی جعلی/بر مبنای کلیک ندارد.
+  3. منوی اصلی (Reply Keyboard در پایین چت):
+     خرید ربات / ارسال گزارش به پشتیبانی / تمدید اشتراک
+  4. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
+     شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
+     پشتیبان به همان کاربر.
+  5. تمدید اشتراک -> هدایت به صفحهٔ خرید/تمدید سایت.
 
-ویژگی‌ها:
+زیرساخت:
   * getUpdates با Long Polling — بدون Webhook
-  * فقط کتابخانه استاندارد Python (urllib) — هیچ pip install لازم نیست
-  * Token از متغیر محیطی SPLUS_BOT_TOKEN خوانده می‌شود (هاردکد نشده)
-  * مدیریت خطا: قطع اینترنت / 429 rate-limit / خطاهای موقت -> تلاش دوباره
-  * شروع پاک: offset از اولین به‌روزرسانیِ تأییدنشده
-
-اجرا در Termux:
-    export SPLUS_BOT_TOKEN="123456:ABC-DEF..."
-    python splus_test_bot.py
+  * فقط کتابخانهٔ استاندارد Python (urllib) — بدون pip install
+  * Token از متغیر محیطی SPLUS_BOT_TOKEN — هرگز در کد/لاگ/git
+  * وضعیت کاربران و تیکت‌ها در data/ (خارج از git)
 """
 
 import json
@@ -24,7 +32,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime
+from pathlib import Path
 
 API_URL_TEMPLATE = "https://api.splus.ir/bot{token}/{method}"
 
@@ -40,6 +50,89 @@ LONG_POLL_TIMEOUT_SECONDS = 30
 # حاشیهٔ زمانی برای تاخیر شبکه؛ تا اتصال long-poll را زودتر نپاره
 HTTP_TIMEOUT_SECONDS = LONG_POLL_TIMEOUT_SECONDS + 35
 RETRY_BACKOFFS = (1, 2, 5, 10, 30)  # ثانیه؛ سقف ۳۰
+
+# ---------------------------------------------------------------------------
+# مسیرها و متن‌ها
+# ---------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = BASE_DIR / "config.json"
+DATA_DIR = BASE_DIR / "data"
+STATE_FILE = DATA_DIR / "pv_state.json"
+WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
+
+START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
+
+VERIFY_CALLBACK = "verify_membership"
+MENU_BUY = "🦊 خرید ربات روباه"
+MENU_REPORT = "🎧 ارسال گزارش به پشتیبانی"
+MENU_EXTEND = "🔄 تمدید اشتراک ربات"
+MAIN_MENU_BUTTONS = (MENU_BUY, MENU_REPORT, MENU_EXTEND)
+MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
+
+PURCHASE_TEXT_HTML = (
+    "<b>🎉 پلن خرید اشتراک روباه</b>\n\n"
+    "مراحل :\n\n"
+    "🔸 وارد سایت میشوید قوانین میخوانید تایید میکنید و شماره تلفن یا یوزنیم "
+    "حساب اصلیتون رو وارد میکنید\n\n"
+    "🔸 اشتراک مورد نظر خودتون رو انتخاب میکنید\n\n"
+    "🔸 به شماره کارت داخل کادر پرداخت میکنید رسید پرداخت رو وارد و لینک "
+    "گروه تون رو می‌نویسید بعد دکمه ارسال درخواست\n\n"
+    "🔸 برای دیدن سفارشات ثبت شده و برسی می‌توانید گزینه برسی سفارشات رو "
+    "بزنید و ببینید آیا رد شده یا آیا در حال انتضار یا تایید شده\n\n"
+    "🔸 بعد از تایید به شماره تلفن ثبت شده یا ایدیتون پیام خواهیم داد\n\n"
+    "👇\n\n"
+    "https://fox-bot.aifox-chat.workers.dev\n"
+    "سایت خرید پلن ربات\n\n"
+    "<blockquote>در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n@osine2"
+    "</blockquote>"
+)
+
+EXTEND_TEXT = (
+    "🔄 تمدید اشتراک ربات\n\n"
+    "برای تمدید اشتراک، وارد سایت خرید روباه شوید و همان مراحل خرید را "
+    "برای تمدید اشتراک خود طی کنید."
+)
+
+REPORT_PROMPT_TEXT = (
+    "🎧 گزارش یا پیام خود را همین‌جا ارسال کنید تا برای پشتیبانی "
+    "(@osine2) ارسال شود."
+)
+REPORT_OK_TEXT = (
+    "✅ گزارش شما برای پشتیبانی ارسال شد.\n"
+    "هرگاه پشتیبان روی همان گزارش Reply کند، پاسخ را همین‌جا دریافت می‌کنید."
+)
+REPORT_FAIL_TEXT = (
+    "⚠️ ارسال به پشتیبانی فعلاً ناموفق بود؛ لطفاً کمی دیگر گزارش را "
+    "ارسال کنید."
+)
+REPORT_NEED_TEXT = (
+    "لطفاً گزارش را به صورت **متن** ارسال کنید (نسخهٔ فعلی فقط گزارش "
+    "متنی را به پشتیبانی می‌فرستد)."
+)
+
+UNVERIFIED_PROMPT_HTML = (
+    "برای فعال‌سازی ربات، ابتدا یک پیام از «کانال روباه» و یک پیام از "
+    "«گروه روباه» را همین‌جا <b>فوروارد</b> کنید تا عضویت واقعی شما "
+    "بررسی شود."
+)
+FORWARD_WRONG_TEXT_HTML = (
+    "🤔 این پیام از کانال یا گروه روباه نبود.\n"
+    "لطفاً یک پیام از <b>همان</b> کانال/گروه را فوروارد کنید."
+)
+
+# مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
+DEFAULT_CONFIG = {
+    "channel_url": "https://splus.ir/ai_fox",
+    "channel_username": "ai_fox",
+    "channel_title": "کانال روباه",
+    "group_url": "https://splus.ir/joingroup/AI_hfuzaN9GGKPWF0MsDJg",
+    "group_title": "گروه روباه",
+    "support_username": "osine2",
+    "site_url": "https://fox-bot.aifox-chat.workers.dev",
+}
+
+CFG = dict(DEFAULT_CONFIG)
+STATE = {"learned": {}, "users": {}, "tickets": {}}
 
 
 class NetworkError(Exception):
@@ -60,6 +153,10 @@ def log(level, message):
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{stamp}] {level.upper():5s} {message}", flush=True)
 
+
+# ---------------------------------------------------------------------------
+# لایهٔ API
+# ---------------------------------------------------------------------------
 
 def api_call(method, params=None):
     """یک متد API را صدا می‌زند.
@@ -113,7 +210,168 @@ def api_call(method, params=None):
     )
 
 
-def is_private_start(message):
+def api_call_multipart(method, fields, files):
+    """مثل api_call ولی با بار multipart (برای آپلود فایل مثل عکس).
+
+    fields: list of (name, value)
+    files:  list of (name, filename, content_bytes, content_type)
+    """
+    token = os.environ.get("SPLUS_BOT_TOKEN", "").strip()
+    url = API_URL_TEMPLATE.format(token=token, method=method)
+    boundary = uuid.uuid4().hex
+    chunks = []
+    for name, value in fields:
+        chunks.append(
+            (f'--{boundary}\r\nContent-Disposition: form-data; '
+             f'name="{name}"\r\n\r\n{value}\r\n').encode("utf-8")
+        )
+    for name, filename, content, content_type in files:
+        chunks.append(
+            (f'--{boundary}\r\nContent-Disposition: form-data; '
+             f'name="{name}"; filename="{filename}"\r\n'
+             f'Content-Type: {content_type}\r\n\r\n').encode("utf-8")
+        )
+        chunks.append(content)
+        chunks.append(b"\r\n")
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(chunks)
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    status, raw = None, b""
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        try:
+            raw = exc.read()
+        except Exception:
+            raw = b""
+    except Exception as exc:
+        raise NetworkError(f"{type(exc).__name__}: {exc}")
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise BotError(status or -1, f"پاسخ غیر-JSON (HTTP {status})")
+
+    ok_value = None
+    for key, value in payload.items():
+        if str(key).lower() == "ok":
+            ok_value = value
+            break
+    if ok_value is True:
+        return payload.get("result")
+
+    error_params = payload.get("parameters") or {}
+    retry_after = (
+        error_params.get("retry_after") if isinstance(error_params, dict) else None
+    )
+    raise BotError(
+        payload.get("error_code", status),
+        payload.get("description") or "خطای ناشناخته",
+        retry_after,
+    )
+
+
+def send_with_retry(chat_id, text, *, parse_mode=None, reply_markup=None,
+                    disable_web_page_preview=False, attempts=3):
+    """ارسال پیام متنی با تلاش دوباره برای خطاهای موقت. True/False برمی‌گرداند."""
+    params = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": bool(disable_web_page_preview),
+    }
+    if parse_mode:
+        params["parse_mode"] = parse_mode
+    if reply_markup is not None:
+        params["reply_markup"] = reply_markup
+    for attempt in range(1, attempts + 1):
+        try:
+            api_call("sendMessage", params)
+            return True
+        except NetworkError as exc:
+            delay = RETRY_BACKOFFS[min(attempt - 1, len(RETRY_BACKOFFS) - 1)]
+            log("warn", f"ارسال ناموفق (تلاش {attempt}/{attempts}): {exc}")
+            time.sleep(delay)
+        except BotError as exc:
+            if exc.retry_after:
+                log("warn", f"محدودیت نرخ — {exc.retry_after} ثانیه صبر می‌کنم")
+                time.sleep(exc.retry_after)
+            else:
+                log("error", f"sendMessage شکست خورد: {exc}")
+                return False
+    log("error", f"ارسال پیام بعد از {attempts} تلاش ناموفق بود (chat {chat_id})")
+    return False
+
+
+# ---------------------------------------------------------------------------
+# config و وضعیت پایدار
+# ---------------------------------------------------------------------------
+
+def load_config():
+    global CFG
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if value is not None:
+                    cfg[key] = value
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log("error", f"خواندن config.json ناموفق: {exc}")
+    CFG = cfg
+    return cfg
+
+
+def load_state():
+    global STATE
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            data.setdefault("learned", {})
+            data.setdefault("users", {})
+            data.setdefault("tickets", {})
+            STATE = data
+            return data
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log("error", f"خواندن وضعیت ذخیره‌شده ناموفق: {exc}")
+    STATE = {"learned": {}, "users": {}, "tickets": {}}
+    return STATE
+
+
+def save_state():
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(STATE, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, STATE_FILE)
+    except Exception as exc:
+        log("error", f"ذخیرهٔ وضعیت ناموفق: {exc}")
+
+
+def get_user_state(user_id):
+    key = str(user_id)
+    record = STATE["users"].get(key)
+    if not isinstance(record, dict):
+        record = {"verified": False, "channel_ok": False,
+                  "group_ok": False, "mode": "proof"}
+        STATE["users"][key] = record
+    return record
+
+
+def is_start_message(message):
     """فقط وقتی True: دستور /start در چت خصوصی (PV)."""
     chat = message.get("chat") or {}
     if chat.get("type") != "private":
@@ -125,49 +383,348 @@ def is_private_start(message):
     return head == "/start" or head.startswith("/start@")
 
 
-def send_welcome(chat_id):
-    """ارسال پیام خوش‌آمد با ۳ تلاش؛ خطای دائمی را لاگ می‌کند و False می‌دهد."""
-    if chat_id is None:
-        log("error", "chat_id پیدا نشد؛ ارسال انجام نشد")
-        return False
-    for attempt in range(1, 4):
-        try:
-            api_call("sendMessage", {
-                "chat_id": chat_id,
-                "text": WELCOME_TEXT,
-                "disable_web_page_preview": True,
-            })
-            return True
-        except NetworkError as exc:
-            delay = RETRY_BACKOFFS[min(attempt - 1, len(RETRY_BACKOFFS) - 1)]
-            log("warn", f"ارسال ناموفق (تلاش {attempt}/3): {exc} — {delay} ثانیه دیگر")
-            time.sleep(delay)
-        except BotError as exc:
-            if exc.retry_after:
-                log("warn", f"محدودیت نرخ — {exc.retry_after} ثانیه صبر می‌کنم")
-                time.sleep(exc.retry_after)
-            else:
-                log("error", f"sendMessage شکست خورد: {exc}")
-                return False
-    log("error", "ارسال پیام خوش‌آمد بعد از ۳ تلاش ناموفق بود")
-    return False
+# ---------------------------------------------------------------------------
+# کیبوردها (JSON مطابق Bot API)
+# ---------------------------------------------------------------------------
 
+def start_inline_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "🔹 کانال روباه", "url": CFG["channel_url"]}],
+        [{"text": "🔹 گروه روباه", "url": CFG["group_url"]}],
+        [{"text": "✅ تایید عضویت", "callback_data": VERIFY_CALLBACK}],
+    ]}
+
+
+def main_reply_keyboard():
+    return {"keyboard": [[label] for label in MAIN_MENU_BUTTONS],
+            "resize_keyboard": True}
+
+
+def site_inline_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "💎 صفحه خرید / تمدید", "url": CFG["site_url"]}],
+    ]}
+
+
+# ---------------------------------------------------------------------------
+# صفحهٔ شروع
+# ---------------------------------------------------------------------------
+
+def send_start_page(user_id):
+    keyboard = start_inline_keyboard()
+    if WELCOME_PHOTO.exists():
+        try:
+            data = WELCOME_PHOTO.read_bytes()
+            fields = [
+                ("chat_id", str(user_id)),
+                ("caption", START_CAPTION),
+                ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+            ]
+            api_call_multipart(
+                "sendPhoto", fields,
+                [("photo", WELCOME_PHOTO.name, data, "image/jpeg")],
+            )
+            log("info", f"صفحهٔ شروع (عکس + دکمه‌ها) ارسال شد — chat {user_id}")
+            return
+        except NetworkError as exc:
+            log("warn", f"sendPhoto ناموفق ({exc}) — ارسال بدون عکس")
+        except BotError as exc:
+            log("error", f"sendPhoto خطا داد: {exc} — ارسال بدون عکس")
+    # جایگزین بدون عکس (فایل عکس موجود نیست یا ارسال شکست)
+    send_with_retry(user_id, START_CAPTION, reply_markup=keyboard)
+    log("info", f"صفحهٔ شروع (متنی) ارسال شد — chat {user_id}")
+
+
+def show_main_menu(user_id, note=None):
+    text = (note + "\n\n" if note else "") + MAIN_MENU_TEXT
+    send_with_retry(user_id, text, reply_markup=main_reply_keyboard())
+
+
+# ---------------------------------------------------------------------------
+# بررسی واقعی عضویت (اثبات فوروارد)
+# ---------------------------------------------------------------------------
+
+def proof_instructions_text(user_state):
+    lines = [
+        "🔍 برای فعال‌سازی، عضویت واقعی شما بررسی می‌شود.",
+        "",
+        "لطفاً یک پیام از «کانال روباه» و یک پیام از «گروه روباه» را "
+        "همین‌جا <b>فوروارد</b> کنید.",
+        "",
+    ]
+    if user_state["channel_ok"]:
+        lines.append("✅ کانال روباه: تأیید شد")
+    else:
+        lines.append(f"⬜ کانال روباه: {CFG['channel_url']}")
+    if user_state["group_ok"]:
+        lines.append("✅ گروه روباه: تأیید شد")
+    else:
+        lines.append(f"⬜ گروه روباه: {CFG['group_url']}")
+    return "\n".join(lines)
+
+
+def matches_fox_channel(forward_chat):
+    learned = STATE["learned"]
+    if forward_chat.get("type") != "channel":
+        return False
+    username = (forward_chat.get("username") or "").lower()
+    if username == str(CFG.get("channel_username") or "").lower():
+        return True
+    if learned.get("channel_id") is not None:
+        if forward_chat.get("id") == learned.get("channel_id"):
+            return True
+    return forward_chat.get("title") == CFG.get("channel_title")
+
+
+def matches_fox_group(forward_chat):
+    learned = STATE["learned"]
+    if forward_chat.get("type") not in ("group", "supergroup"):
+        return False
+    if learned.get("group_id") is not None:
+        if forward_chat.get("id") == learned.get("group_id"):
+            return True
+    return forward_chat.get("title") == CFG.get("group_title")
+
+
+def finish_verification(user_id, user_state):
+    user_state["verified"] = True
+    user_state["mode"] = "main"
+    save_state()
+    log("info", f"عضویت کاربر {user_id} تأیید شد")
+    show_main_menu(user_id, note="✅ عضویت شما تأیید شد.")
+
+
+def handle_unverified_message(message, user_id):
+    """کاربر هنوز تأیید نشده: فقط فوروارد از کانال/گروه روباه معتبر است."""
+    user_state = get_user_state(user_id)
+    forward_chat = message.get("forward_from_chat") or {}
+    if forward_chat:
+        learned = STATE["learned"]
+        if (not user_state["channel_ok"]
+                and matches_fox_channel(forward_chat)):
+            user_state["channel_ok"] = True
+            if learned.get("channel_id") is None:
+                learned["channel_id"] = forward_chat.get("id")
+            save_state()
+            log("info", f"عضویت کانال تأیید شد — user {user_id} "
+                        f"(chat {forward_chat.get('id')})")
+            if user_state["group_ok"]:
+                finish_verification(user_id, user_state)
+            else:
+                send_with_retry(
+                    user_id,
+                    "✅ عضویت شما در کانال روباه تأیید شد.\n"
+                    "حالا یک پیام از «گروه روباه» را فوروارد کنید.")
+            return
+        if (not user_state["group_ok"]
+                and matches_fox_group(forward_chat)):
+            user_state["group_ok"] = True
+            if learned.get("group_id") is None:
+                learned["group_id"] = forward_chat.get("id")
+            save_state()
+            log("info", f"عضویت گروه تأیید شد — user {user_id} "
+                        f"(chat {forward_chat.get('id')})")
+            if user_state["channel_ok"]:
+                finish_verification(user_id, user_state)
+            else:
+                send_with_retry(
+                    user_id,
+                    "✅ عضویت شما در گروه روباه تأیید شد.\n"
+                    "حالا یک پیام از «کانال روباه» را فوروارد کنید.")
+            return
+        send_with_retry(user_id, FORWARD_WRONG_TEXT_HTML, parse_mode="HTML")
+        return
+    # پیام عادی (بدون فوروارد) از کاربر تأییدنشده
+    send_with_retry(user_id, UNVERIFIED_PROMPT_HTML, parse_mode="HTML")
+
+
+def handle_verify_callback(callback):
+    user = callback.get("from") or {}
+    user_id = user.get("id")
+    if user_id is None:
+        return
+    try:
+        api_call("answerCallbackQuery", {"callback_query_id": callback.get("id")})
+    except (NetworkError, BotError) as exc:
+        log("warn", f"answerCallbackQuery ناموفق: {exc}")
+    user_state = get_user_state(user_id)
+    if user_state["verified"]:
+        show_main_menu(user_id, note="✅ عضویت شما از قبل تأیید شده است.")
+        return
+    user_state["mode"] = "proof"
+    save_state()
+    send_with_retry(user_id, proof_instructions_text(user_state),
+                    parse_mode="HTML")
+    log("info", f"دستورالعمل تایید عضویت ارسال شد — user {user_id}")
+
+
+# ---------------------------------------------------------------------------
+# گزارش پشتیبانی + مسیر برگشت Reply
+# ---------------------------------------------------------------------------
+
+def is_support_sender(sender):
+    sender_id = sender.get("id")
+    if sender_id is None:
+        return False
+    learned_id = STATE["learned"].get("support_user_id")
+    if learned_id is not None:
+        return sender_id == learned_id
+    support_username = str(CFG.get("support_username") or "").lower()
+    if not support_username:
+        return False
+    return (sender.get("username") or "").lower() == support_username
+
+
+def handle_support_message(message, support_user_id):
+    """Reply پشتیبان روی پیام گزارش -> ارسال پاسخ به همان کاربر."""
+    reply_to = message.get("reply_to_message") or {}
+    reply_to_id = reply_to.get("message_id")
+    if reply_to_id is None:
+        return False
+    target_user = STATE["tickets"].get(str(reply_to_id))
+    if target_user is None:
+        return False
+    reply_text = (message.get("text") or "").strip() or "(پاسخ بدون متن)"
+    delivered = send_with_retry(target_user, f"🔔 پاسخ پشتیبانی:\n\n{reply_text}")
+    if delivered:
+        send_with_retry(support_user_id, "✅ پاسخ برای کاربر ارسال شد.")
+        log("info", f"پاسخ پشتیبانی (تیکت {reply_to_id}) -> user {target_user}")
+    return True
+
+
+def handle_report(message, user_id):
+    sender = message.get("from") or {}
+    report_text = (message.get("text") or "").strip()
+    if not report_text:
+        send_with_retry(user_id, REPORT_NEED_TEXT, parse_mode="Markdown")
+        return
+    first_name = sender.get("first_name") or "—"
+    last_name = sender.get("last_name") or ""
+    username = sender.get("username")
+    support_chat_id = (
+        STATE["learned"].get("support_user_id")
+        or "@" + str(CFG.get("support_username") or "osine2")
+    )
+    lines = [
+        "📥 گزارش جدید از کاربر AIFox",
+        f"👤 نام: {first_name} {last_name}".rstrip(),
+        f"🆔 نام کاربری: @{username}" if username else "🆔 نام کاربری: —",
+        f"🔢 شناسه: {user_id}",
+        "──────────────",
+        report_text,
+    ]
+    try:
+        result = api_call("sendMessage", {
+            "chat_id": support_chat_id,
+            "text": "\n".join(lines),
+        })
+    except (NetworkError, BotError) as exc:
+        log("error", f"ارسال گزارش به پشتیبان ناموفق: {exc}")
+        send_with_retry(user_id, REPORT_FAIL_TEXT)
+        return
+    support_message_id = (result or {}).get("message_id")
+    if support_message_id is not None:
+        STATE["tickets"][str(support_message_id)] = user_id
+        save_state()
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "main"
+    send_with_retry(user_id, REPORT_OK_TEXT)
+    log("info", f"گزارش user {user_id} -> پشتیبان (پیام {support_message_id})")
+
+
+# ---------------------------------------------------------------------------
+# منوی اصلی
+# ---------------------------------------------------------------------------
+
+def handle_menu_text(user_id, text):
+    if text == MENU_BUY:
+        send_with_retry(user_id, PURCHASE_TEXT_HTML, parse_mode="HTML")
+        log("info", f"صفحهٔ خرید ارسال شد — user {user_id}")
+    elif text == MENU_REPORT:
+        user_state = get_user_state(user_id)
+        user_state["mode"] = "report"
+        save_state()
+        send_with_retry(user_id, REPORT_PROMPT_TEXT)
+    elif text == MENU_EXTEND:
+        send_with_retry(user_id, EXTEND_TEXT,
+                        reply_markup=site_inline_keyboard())
+        log("info", f"پیام تمدید ارسال شد — user {user_id}")
+    else:
+        # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
+        show_main_menu(user_id)
+
+
+# ---------------------------------------------------------------------------
+# مسیریابی update
+# ---------------------------------------------------------------------------
 
 def handle_update(update):
-    """فعلاً فقط /start در PV پردازش می‌شود.
-
-    سایر انواع update (edited_message, callback_query, گروه و ...)
-    نادیده گرفته می‌شوند؛ offset در حلقهٔ اصلی پیش می‌رود.
-    """
+    """فقط پیام‌های PV پردازش می‌شوند؛ بقیه نادیده گرفته می‌شوند."""
     message = update.get("message")
     if message is None:
+        callback = update.get("callback_query")
+        if callback and callback.get("data") == VERIFY_CALLBACK:
+            try:
+                handle_verify_callback(callback)
+            except (NetworkError, BotError) as exc:
+                log("error", f"خطا در callback: {exc}")
         return
-    if not is_private_start(message):
+
+    chat = message.get("chat") or {}
+    if chat.get("type") != "private":
         return
-    chat_id = (message.get("chat") or {}).get("id")
-    if send_welcome(chat_id):
-        user = (message.get("from") or {}).get("first_name", "?")
-        log("info", f"پیام خوش‌آمد ارسال شد — {user} (chat {chat_id})")
+    sender = message.get("from") or {}
+    user_id = sender.get("id")
+    if user_id is None:
+        return
+
+    # یادگیری شناسهٔ عددی پشتیبان از اولین پیام خودش
+    support_username = str(CFG.get("support_username") or "").lower()
+    if (support_username
+            and (sender.get("username") or "").lower() == support_username
+            and STATE["learned"].get("support_user_id") is None):
+        STATE["learned"]["support_user_id"] = user_id
+        save_state()
+        log("info", f"شناسهٔ پشتیبان ثبت شد: {user_id}")
+
+    if is_start_message(message):
+        user_state = get_user_state(user_id)
+        if user_state["verified"]:
+            show_main_menu(user_id)
+        else:
+            user_state["mode"] = "proof"
+            save_state()
+            send_start_page(user_id)
+        return
+
+    if is_support_sender(sender):
+        try:
+            handle_support_message(message, user_id)
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در پیام پشتیبان: {exc}")
+        return
+
+    text = (message.get("text") or "").strip()
+    user_state = get_user_state(user_id)
+
+    if user_state.get("mode") == "report":
+        try:
+            handle_report(message, user_id)
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در ثبت گزارش: {exc}")
+        return
+
+    if not user_state.get("verified"):
+        try:
+            handle_unverified_message(message, user_id)
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در بررسی عضویت: {exc}")
+        return
+
+    try:
+        handle_menu_text(user_id, text)
+    except (NetworkError, BotError) as exc:
+        log("error", f"خطا در منوی اصلی: {exc}")
 
 
 def wait_backoff(attempt, reason):
@@ -181,6 +738,9 @@ def main():
         log("error", "متغیر محیطی SPLUS_BOT_TOKEN تنظیم نشده است.")
         log("error", 'مثال: export SPLUS_BOT_TOKEN="123456:ABC-DEF..."')
         sys.exit(1)
+
+    load_config()
+    load_state()
 
     # --- ۱) اعتبارسنجی token با getMe (با تلاش دوباره) -------------------
     attempt = 0
