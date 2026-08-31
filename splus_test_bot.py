@@ -4,16 +4,19 @@
 AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
 ====================================================
 قابلیت‌ها (فقط در PV):
-  1. /start -> عکس خوش‌آمد + متن عضویت + دکمه‌های کانال/گروه
-     + دکمه «✅ تایید عضویت»
+  1. /start -> عکس خوش‌آمد + متن عضویت + لینک‌های واقعیِ قابل‌کلیک در
+     زیرعنوان همان پیام + دکمه‌های کانال/گروه + دکمه «✅ تایید عضویت»
   2. تایید عضویت بر اساس کلیک روی دکمه‌ها (طبق خواست مالک):
      تا کاربر روی هر دو دکمه «کانال روباه» و «گروه روباه» کلیک نکرده
      باشد، «تایید عضویت» او را فعال نمی‌کند.
      (توضیح فنی: Bot API کلیک روی دکمه‌های لینک/URL را به سرور گزارش
-     نمی‌کند؛ برای همین دکمه‌ها callback هستند. با هر کلیک، ثبت می‌شود
-     و لینک واقعی همان لحظه برای کاربر ارسال می‌شود.)
+     نمی‌کند؛ برای همین دکمه‌ها callback هستند و با هر کلیک فقط ثبت
+     می‌شود — هیچ پیام جدا ارسال نمی‌شود. برای ورود به کانال/گروه،
+     لینک‌های واقعی داخل همان پیام شروع (زیرعنوان عکس) قرار دارد.)
   3. منوی اصلی (Reply Keyboard در پایین چت):
      خرید ربات / ارسال گزارش به پشتیبانی / تمدید اشتراک
+  3b. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
+     پشتیبانی (MarkdownV2: > )
   4. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
@@ -60,7 +63,7 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "pv_state.json"
 WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
 
-START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
+START_CAPTION_BASE = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
 
 VERIFY_CALLBACK = "verify_membership"
 VISIT_CHANNEL_CALLBACK = "visit_channel"
@@ -71,7 +74,7 @@ MENU_EXTEND = "🔄 تمدید اشتراک ربات"
 MAIN_MENU_BUTTONS = (MENU_BUY, MENU_REPORT, MENU_EXTEND)
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 
-PURCHASE_TEXT_HTML = (
+PURCHASE_MAIN_HTML = (
     "<b>🎉 پلن خرید اشتراک روباه</b>\n\n"
     "مراحل :\n\n"
     "🔸 وارد سایت میشوید قوانین میخوانید تایید میکنید و شماره تلفن یا یوزنیم "
@@ -84,9 +87,12 @@ PURCHASE_TEXT_HTML = (
     "🔸 بعد از تایید به شماره تلفن ثبت شده یا ایدیتون پیام خواهیم داد\n\n"
     "👇\n\n"
     "https://fox-bot.aifox-chat.workers.dev\n"
-    "سایت خرید پلن ربات\n\n"
-    "<blockquote>در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n@osine2"
-    "</blockquote>"
+    "سایت خرید پلن ربات"
+)
+# نقل‌قول سروش: تگ blockquote فقط در MarkdownV2 (صورت > ) پشتیبانی می‌شود
+PURCHASE_QUOTE_MD = (
+    "> در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n"
+    "> @osine2"
 )
 
 EXTEND_TEXT = (
@@ -112,7 +118,7 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-VISIT_DONE_TEXT = "🔹 {title}:\n{url}\n\nروی لینک بالا بزنید؛ کلیک شما ثبت شد."
+VISIT_DONE_TEXT = "ثبت شد ✅"
 
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
@@ -410,14 +416,24 @@ def site_inline_keyboard():
 # صفحهٔ شروع
 # ---------------------------------------------------------------------------
 
+def start_caption():
+    """متن زیر عکس + لینک‌های واقعیِ قابل‌کلیک (داخل همان پیام شروع)."""
+    return (
+        f"{START_CAPTION_BASE}\n\n"
+        f"🔹 کانال روباه: {CFG['channel_url']}\n"
+        f"🔹 گروه روباه: {CFG['group_url']}"
+    )
+
+
 def send_start_page(user_id):
     keyboard = start_inline_keyboard()
+    caption = start_caption()
     if WELCOME_PHOTO.exists():
         try:
             data = WELCOME_PHOTO.read_bytes()
             fields = [
                 ("chat_id", str(user_id)),
-                ("caption", START_CAPTION),
+                ("caption", caption),
                 ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
             ]
             api_call_multipart(
@@ -431,7 +447,7 @@ def send_start_page(user_id):
         except BotError as exc:
             log("error", f"sendPhoto خطا داد: {exc} — ارسال بدون عکس")
     # جایگزین بدون عکس (فایل عکس موجود نیست یا ارسال شکست)
-    send_with_retry(user_id, START_CAPTION, reply_markup=keyboard)
+    send_with_retry(user_id, caption, reply_markup=keyboard)
     log("info", f"صفحهٔ شروع (متنی) ارسال شد — chat {user_id}")
 
 
@@ -478,7 +494,11 @@ def handle_unverified_message(message, user_id):
 
 
 def handle_visit_callback(callback, kind):
-    """کلیک روی دکمهٔ کانال/گروه: ثبت کلیک + ارسال لینک واقعی."""
+    """کلیک روی دکمهٔ کانال/گروه: فقط ثبت کلیک (بدون ارسال پیام جدا).
+
+    لینک‌های واقعیِ قابل‌کلیک در همان پیام شروع (زیرعنوان عکس) هست؛
+    دکمه‌ها callback هستند چون Bot API کلیک روی دکمهٔ URL را گزارش نمی‌کند.
+    """
     user = callback.get("from") or {}
     user_id = user.get("id")
     if user_id is None:
@@ -486,19 +506,16 @@ def handle_visit_callback(callback, kind):
     user_state = get_user_state(user_id)
     if kind == "channel":
         user_state["channel_clicked"] = True
-        title, url = "کانال روباه", CFG["channel_url"]
     else:
         user_state["group_clicked"] = True
-        title, url = "گروه روباه", CFG["group_url"]
     save_state()
     try:
         api_call("answerCallbackQuery", {
             "callback_query_id": callback.get("id"),
-            "text": "ثبت شد 👍",
+            "text": VISIT_DONE_TEXT,
         })
     except (NetworkError, BotError) as exc:
         log("warn", f"answerCallbackQuery ناموفق: {exc}")
-    send_with_retry(user_id, VISIT_DONE_TEXT.format(title=title, url=url))
     log("info", f"کلیک {kind} ثبت شد — user {user_id}")
 
 
@@ -605,7 +622,10 @@ def handle_report(message, user_id):
 
 def handle_menu_text(user_id, text):
     if text == MENU_BUY:
-        send_with_retry(user_id, PURCHASE_TEXT_HTML, parse_mode="HTML")
+        # پیام اصلی (HTML: فقط bold — تگ‌های غیرمستند مثل blockquote باعث
+        # رد شدن کل پیام می‌شوند) + نقل‌قول پشتیبانی (MarkdownV2)
+        send_with_retry(user_id, PURCHASE_MAIN_HTML, parse_mode="HTML")
+        send_with_retry(user_id, PURCHASE_QUOTE_MD, parse_mode="MarkdownV2")
         log("info", f"صفحهٔ خرید ارسال شد — user {user_id}")
     elif text == MENU_REPORT:
         user_state = get_user_state(user_id)
