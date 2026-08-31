@@ -17,12 +17,18 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۳: سایت بازی روباه | کانال راهنما
   4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
-  5. مهلت باقی‌ماندهٔ گروه: کاربر لینک گروهش را می‌فرستد؛ کلیدهای
-     فایل زندهٔ ربات اصلی group_expiry.json (READ-ONLY، مسیر از
-     config.json) با توکن لینک تطبیق می‌شود و از expires_at زمان
-     باقی‌مانده محاسبه می‌شود. اگر فایل از محیط اجرا قابل دسترسی نباشد،
-     دقیقاً همین را اعلام می‌کند (حدس نمی‌زند). این reader منبع مشترک
-     «مهلت» و «تمدید اشتراک» آینده است.
+  5. مهلت باقی‌ماندهٔ گروه: فایل زندهٔ ربات اصلی group_expiry.json
+     (READ-ONLY، مسیر از config.json) — ساختار واقعی:
+     کلید = شناسهٔ عددی گروه، مقدار = {expires_at, title, ...}.
+     کاربر **لینک یا نام گروه یا شناسهٔ عددی** می‌فرستد:
+       a) id عددی -> کلید مستقیم
+       b) توکن لینک -> کلید (برای فرمت‌های کد/URL)
+       c) نام گروه -> تطبیق NFKC با title رکوردها (حروف استایلی
+          مثل 𝗚𝗿𝗼𝘂𝗽 هم با Group مطابقت می‌دهند)
+     Bot API لینک را به id تبدیل نمی‌کند؛ به همین دلیل (c) راهِ
+     اصلی است. اگر فایل از محیط اجرا قابل دسترسی نباشد، دقیقاً همین
+     را اعلام می‌کند (حدس نمی‌زند). این reader منبع مشترک «مهلت» و
+     «تمدید اشتراک» آینده است.
   6. سایت بازی روباه -> عکس + دکمهٔ inline URL
   7. کانال راهنما -> دکمهٔ inline URL
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
@@ -41,6 +47,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import time
 import urllib.error
 import urllib.request
@@ -129,9 +136,10 @@ REPORT_NEED_TEXT = (
 )
 
 DEADLINE_ASK_TEXT = (
-    "🔗 لطفاً لینک گروه خود را ارسال کنید تا مهلت باقی‌ماندهٔ اشتراک "
+    "🔗 لینک یا نام دقیق گروه خود را بفرستید تا مهلت باقی‌ماندهٔ اشتراک "
     "آن را بررسی کنم.\n"
-    "(برای لغو، «انصراف» بفرستید)"
+    "(اگر شناسهٔ عددی گروه را هم می‌دانید، همان را بفرستید)\n\n"
+    "برای لغو: «انصراف»"
 )
 DEADLINE_NOT_FOUND_FILE_TEXT = (
     "⚠️ فایل اطلاعات اشتراک از این محیط قابل خواندن نیست (READ-ONLY):\n"
@@ -754,8 +762,35 @@ def resolve_group_key(candidates, expiry):
     return None
 
 
+def _norm_title(s):
+    """نرمال‌سازی عنوان: NFKC (حروف استایلی -> معمولی) + کوچک + فاصله‌یکتا."""
+    s = unicodedata.normalize("NFKC", str(s))
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def resolve_group_title(text, expiry):
+    """تطبیق **نام** گروه (بخش غیر-لینکِ پیام) با عنوان رکوردها.
+
+    کلیدهای group_expiry.json شناسهٔ عددی هستند و Bot API لینک را به
+    id تبدیل نمی‌کند؛ اما هر رکورد title دارد، پس نام گروه راهِ
+    کاربریِ اصلی است. تطبیق: دقیق / جزئی، بعد از نرمال‌سازی NFKC.
+    """
+    query = _norm_title(re.sub(r"https?://[^\s]+", " ", text))
+    if len(query) < 3:
+        return None
+    for key, record in expiry.items():
+        title = record.get("title") if isinstance(record, dict) else None
+        if not title:
+            continue
+        normalized = _norm_title(title)
+        if normalized and (query == normalized or query in normalized
+                           or normalized in query):
+            return key
+    return None
+
+
 def handle_group_deadline(user_id):
-    """کلیک «⏳ مهلت باقی‌مانده گروه» -> درخواست لینک گروه."""
+    """کلیک «⏳ مهلت باقی‌مانده گروه» -> درخواست لینک/نام گروه."""
     user_state = get_user_state(user_id)
     user_state["mode"] = "deadline"
     save_state()
@@ -768,6 +803,7 @@ def handle_deadline_link(message, user_id):
     text = (message.get("text") or "").strip()
 
     if not text:
+        # پیام بدون متن (مثلاً استیکر): دوباره درخواست
         user_state["mode"] = "deadline"
         save_state()
         send_with_retry(user_id, DEADLINE_ASK_TEXT)
@@ -777,14 +813,6 @@ def handle_deadline_link(message, user_id):
         user_state["mode"] = "main"
         save_state()
         show_main_menu(user_id)
-        return
-
-    candidates = deadline_candidates(text)
-    if not candidates:
-        # متنی بدون لینک/اید: دوباره لینک بخواهیم
-        user_state["mode"] = "deadline"
-        save_state()
-        send_with_retry(user_id, DEADLINE_ASK_TEXT)
         return
 
     user_state["mode"] = "main"
@@ -803,17 +831,23 @@ def handle_deadline_link(message, user_id):
         show_main_menu(user_id)
         return
 
-    key = resolve_group_key(candidates, expiry)
+    candidates = deadline_candidates(text)
+    key = resolve_group_key(candidates, expiry) if candidates else None
     if key is None:
-        sample_keys = list(expiry.keys())[:3]
-        log("warn", f"مهلت گروه: تطبیق نشد — candidates={candidates} | "
-                    f"کلیدهای نمونهٔ فایل: {sample_keys} | user {user_id} "
-                    f"(file: {path})")
+        key = resolve_group_title(text, expiry)
+    if key is None:
+        sample = [(k, rec.get("title") if isinstance(rec, dict) else None)
+                  for k, rec in list(expiry.items())[:3]]
+        log("warn", f"مهلت گروه: تطبیق نشد — candidates={candidates}, "
+                    f"متن: {text[:50]!r} | نمونهٔ کلیدها/عناوین: {sample} | "
+                    f"user {user_id} (file: {path})")
         send_with_retry(user_id, "❌ این گروه در سیستم ثبت نشده است.")
         show_main_menu(user_id)
         return
 
-    dt = parse_expiry(expiry.get(key))
+    record = expiry.get(key)
+    raw_expiry = record.get("expires_at") if isinstance(record, dict) else record
+    dt = parse_expiry(raw_expiry)
     if dt is None:
         log("error", f"expires_at گروه {key} قابل خواندن نیست: "
                      f"{expiry.get(key)!r}")
