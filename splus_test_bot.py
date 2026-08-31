@@ -4,14 +4,14 @@
 AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
 ====================================================
 قابلیت‌ها (فقط در PV):
-  1. /start -> عکس خوش‌آمد + متن عضویت + دکمه‌های کانال/گروه (لینک واقعی)
+  1. /start -> عکس خوش‌آمد + متن عضویت + دکمه‌های کانال/گروه
      + دکمه «✅ تایید عضویت»
-  2. بررسی واقعی عضویت با «اثبات فوروارد»: کاربر یک پیام از کانال و
-     گروه روباه را فوروارد می‌کند و ربات forward_from_chat واقعی (id /
-     username / title) را با مقادیر config تطبیق می‌دهد.
-     توضیح: Bot API مستند سروش‌پلاس متد جستجوی عضویت (مثل
-     getChatMember) ندارد؛ فوروارد، قوی‌ترین بررسی واقعیِ قابل
-     اجرا با متدهای مستند است. هیچ بررسی جعلی/بر مبنای کلیک ندارد.
+  2. تایید عضویت بر اساس کلیک روی دکمه‌ها (طبق خواست مالک):
+     تا کاربر روی هر دو دکمه «کانال روباه» و «گروه روباه» کلیک نکرده
+     باشد، «تایید عضویت» او را فعال نمی‌کند.
+     (توضیح فنی: Bot API کلیک روی دکمه‌های لینک/URL را به سرور گزارش
+     نمی‌کند؛ برای همین دکمه‌ها callback هستند. با هر کلیک، ثبت می‌شود
+     و لینک واقعی همان لحظه برای کاربر ارسال می‌شود.)
   3. منوی اصلی (Reply Keyboard در پایین چت):
      خرید ربات / ارسال گزارش به پشتیبانی / تمدید اشتراک
   4. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
@@ -63,6 +63,8 @@ WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
 START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
 
 VERIFY_CALLBACK = "verify_membership"
+VISIT_CHANNEL_CALLBACK = "visit_channel"
+VISIT_GROUP_CALLBACK = "visit_group"
 MENU_BUY = "🦊 خرید ربات روباه"
 MENU_REPORT = "🎧 ارسال گزارش به پشتیبانی"
 MENU_EXTEND = "🔄 تمدید اشتراک ربات"
@@ -110,15 +112,7 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-UNVERIFIED_PROMPT_HTML = (
-    "برای فعال‌سازی ربات، ابتدا یک پیام از «کانال روباه» و یک پیام از "
-    "«گروه روباه» را همین‌جا <b>فوروارد</b> کنید تا عضویت واقعی شما "
-    "بررسی شود."
-)
-FORWARD_WRONG_TEXT_HTML = (
-    "🤔 این پیام از کانال یا گروه روباه نبود.\n"
-    "لطفاً یک پیام از <b>همان</b> کانال/گروه را فوروارد کنید."
-)
+VISIT_DONE_TEXT = "🔹 {title}:\n{url}\n\nروی لینک بالا بزنید؛ کلیک شما ثبت شد."
 
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
@@ -365,9 +359,15 @@ def get_user_state(user_id):
     key = str(user_id)
     record = STATE["users"].get(key)
     if not isinstance(record, dict):
-        record = {"verified": False, "channel_ok": False,
-                  "group_ok": False, "mode": "proof"}
+        record = {"verified": False, "channel_clicked": False,
+                  "group_clicked": False, "mode": "proof"}
         STATE["users"][key] = record
+        return record
+    # سازگاری با وضعیت‌های نسخهٔ قبل (کلیک‌های ثبت‌شده به‌شمار می‌روند)
+    if "channel_clicked" not in record:
+        record["channel_clicked"] = bool(record.get("channel_ok"))
+    if "group_clicked" not in record:
+        record["group_clicked"] = bool(record.get("group_ok"))
     return record
 
 
@@ -389,8 +389,8 @@ def is_start_message(message):
 
 def start_inline_keyboard():
     return {"inline_keyboard": [
-        [{"text": "🔹 کانال روباه", "url": CFG["channel_url"]}],
-        [{"text": "🔹 گروه روباه", "url": CFG["group_url"]}],
+        [{"text": "🔹 کانال روباه", "callback_data": VISIT_CHANNEL_CALLBACK}],
+        [{"text": "🔹 گروه روباه", "callback_data": VISIT_GROUP_CALLBACK}],
         [{"text": "✅ تایید عضویت", "callback_data": VERIFY_CALLBACK}],
     ]}
 
@@ -441,49 +441,26 @@ def show_main_menu(user_id, note=None):
 
 
 # ---------------------------------------------------------------------------
-# بررسی واقعی عضویت (اثبات فوروارد)
+# تایید عضویت بر اساس کلیک روی دکمه‌ها
 # ---------------------------------------------------------------------------
 
-def proof_instructions_text(user_state):
+def click_status_text(user_state):
     lines = [
-        "🔍 برای فعال‌سازی، عضویت واقعی شما بررسی می‌شود.",
-        "",
-        "لطفاً یک پیام از «کانال روباه» و یک پیام از «گروه روباه» را "
-        "همین‌جا <b>فوروارد</b> کنید.",
+        "🔍 برای فعال‌سازی، باید روی هر دو دکمهٔ «کانال روباه» و "
+        "«گروه روباه» کلیک کنید.",
         "",
     ]
-    if user_state["channel_ok"]:
-        lines.append("✅ کانال روباه: تأیید شد")
+    if user_state["channel_clicked"]:
+        lines.append("✅ کانال روباه: کلیک ثبت شد")
     else:
-        lines.append(f"⬜ کانال روباه: {CFG['channel_url']}")
-    if user_state["group_ok"]:
-        lines.append("✅ گروه روباه: تأیید شد")
+        lines.append("⬜ کانال روباه: هنوز کلیک نشده")
+    if user_state["group_clicked"]:
+        lines.append("✅ گروه روباه: کلیک ثبت شد")
     else:
-        lines.append(f"⬜ گروه روباه: {CFG['group_url']}")
+        lines.append("⬜ گروه روباه: هنوز کلیک نشده")
+    lines.append("")
+    lines.append("روی دکمه‌های باقی‌مانده در پیام شروع بزنید و بعد «✅ تایید عضویت» را دوباره بزنید.")
     return "\n".join(lines)
-
-
-def matches_fox_channel(forward_chat):
-    learned = STATE["learned"]
-    if forward_chat.get("type") != "channel":
-        return False
-    username = (forward_chat.get("username") or "").lower()
-    if username == str(CFG.get("channel_username") or "").lower():
-        return True
-    if learned.get("channel_id") is not None:
-        if forward_chat.get("id") == learned.get("channel_id"):
-            return True
-    return forward_chat.get("title") == CFG.get("channel_title")
-
-
-def matches_fox_group(forward_chat):
-    learned = STATE["learned"]
-    if forward_chat.get("type") not in ("group", "supergroup"):
-        return False
-    if learned.get("group_id") is not None:
-        if forward_chat.get("id") == learned.get("group_id"):
-            return True
-    return forward_chat.get("title") == CFG.get("group_title")
 
 
 def finish_verification(user_id, user_state):
@@ -495,47 +472,34 @@ def finish_verification(user_id, user_state):
 
 
 def handle_unverified_message(message, user_id):
-    """کاربر هنوز تأیید نشده: فقط فوروارد از کانال/گروه روباه معتبر است."""
+    """کاربر هنوز تایید نشده: فقط با کلیک روی دکمه‌ها پیش می‌رود."""
     user_state = get_user_state(user_id)
-    forward_chat = message.get("forward_from_chat") or {}
-    if forward_chat:
-        learned = STATE["learned"]
-        if (not user_state["channel_ok"]
-                and matches_fox_channel(forward_chat)):
-            user_state["channel_ok"] = True
-            if learned.get("channel_id") is None:
-                learned["channel_id"] = forward_chat.get("id")
-            save_state()
-            log("info", f"عضویت کانال تأیید شد — user {user_id} "
-                        f"(chat {forward_chat.get('id')})")
-            if user_state["group_ok"]:
-                finish_verification(user_id, user_state)
-            else:
-                send_with_retry(
-                    user_id,
-                    "✅ عضویت شما در کانال روباه تأیید شد.\n"
-                    "حالا یک پیام از «گروه روباه» را فوروارد کنید.")
-            return
-        if (not user_state["group_ok"]
-                and matches_fox_group(forward_chat)):
-            user_state["group_ok"] = True
-            if learned.get("group_id") is None:
-                learned["group_id"] = forward_chat.get("id")
-            save_state()
-            log("info", f"عضویت گروه تأیید شد — user {user_id} "
-                        f"(chat {forward_chat.get('id')})")
-            if user_state["channel_ok"]:
-                finish_verification(user_id, user_state)
-            else:
-                send_with_retry(
-                    user_id,
-                    "✅ عضویت شما در گروه روباه تأیید شد.\n"
-                    "حالا یک پیام از «کانال روباه» را فوروارد کنید.")
-            return
-        send_with_retry(user_id, FORWARD_WRONG_TEXT_HTML, parse_mode="HTML")
+    send_with_retry(user_id, click_status_text(user_state))
+
+
+def handle_visit_callback(callback, kind):
+    """کلیک روی دکمهٔ کانال/گروه: ثبت کلیک + ارسال لینک واقعی."""
+    user = callback.get("from") or {}
+    user_id = user.get("id")
+    if user_id is None:
         return
-    # پیام عادی (بدون فوروارد) از کاربر تأییدنشده
-    send_with_retry(user_id, UNVERIFIED_PROMPT_HTML, parse_mode="HTML")
+    user_state = get_user_state(user_id)
+    if kind == "channel":
+        user_state["channel_clicked"] = True
+        title, url = "کانال روباه", CFG["channel_url"]
+    else:
+        user_state["group_clicked"] = True
+        title, url = "گروه روباه", CFG["group_url"]
+    save_state()
+    try:
+        api_call("answerCallbackQuery", {
+            "callback_query_id": callback.get("id"),
+            "text": "ثبت شد 👍",
+        })
+    except (NetworkError, BotError) as exc:
+        log("warn", f"answerCallbackQuery ناموفق: {exc}")
+    send_with_retry(user_id, VISIT_DONE_TEXT.format(title=title, url=url))
+    log("info", f"کلیک {kind} ثبت شد — user {user_id}")
 
 
 def handle_verify_callback(callback):
@@ -551,11 +515,14 @@ def handle_verify_callback(callback):
     if user_state["verified"]:
         show_main_menu(user_id, note="✅ عضویت شما از قبل تأیید شده است.")
         return
+    if user_state["channel_clicked"] and user_state["group_clicked"]:
+        finish_verification(user_id, user_state)
+        return
+    # هنوز هر دو کلیک ثبت نشده -> تایید نمی‌شود
     user_state["mode"] = "proof"
     save_state()
-    send_with_retry(user_id, proof_instructions_text(user_state),
-                    parse_mode="HTML")
-    log("info", f"دستورالعمل تایید عضویت ارسال شد — user {user_id}")
+    send_with_retry(user_id, click_status_text(user_state))
+    log("info", f"درخواست تایید بدون کلیک کامل — user {user_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -663,9 +630,17 @@ def handle_update(update):
     message = update.get("message")
     if message is None:
         callback = update.get("callback_query")
-        if callback and callback.get("data") == VERIFY_CALLBACK:
+        data = callback.get("data") if callback else None
+        if data == VERIFY_CALLBACK:
             try:
                 handle_verify_callback(callback)
+            except (NetworkError, BotError) as exc:
+                log("error", f"خطا در callback: {exc}")
+        elif data in (VISIT_CHANNEL_CALLBACK, VISIT_GROUP_CALLBACK):
+            try:
+                handle_visit_callback(
+                    callback,
+                    "channel" if data == VISIT_CHANNEL_CALLBACK else "group")
             except (NetworkError, BotError) as exc:
                 log("error", f"خطا در callback: {exc}")
         return
