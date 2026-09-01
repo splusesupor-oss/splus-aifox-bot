@@ -1048,22 +1048,18 @@ def handle_update(update):
             send_start_page(user_id)
         return
 
-    if is_support_sender(sender):
-        try:
-            handle_support_message(message, user_id)
-        except (NetworkError, BotError) as exc:
-            log("error", f"خطا در پیام پشتیبان: {exc}")
-        return
-
     text = (message.get("text") or "").strip()
-    user_state = record_user_name(sender, user_id)
 
-    # دستورات مدیریتی مالک (فقط تایپی) — اولویت روی حالت‌های دیگر
-    if text in (ADMIN_MEMBERS_CMD, ADMIN_NOTIFY_CMD):
-        log("info", f"دستور مدیریتی «{text}» از user {user_id} — "
-                    f"owner_user_id={CFG.get('owner_user_id')} "
-                    f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗ (نادیده گرفته شد)'}")
+    # دستورات مدیریتی مالک (فقط تایپی) — قبل از شاخهٔ پشتیبان:
+    # مالک خودش پشتیبان (@osine2) است؛ اگر اول support بررسی شود،
+    # دستوراتش به‌عنوان پیام پشتیبان بلعیده می‌شد. پشتیبانِ غیرمالک
+    # به‌عنوان عضو ثبت نمی‌شود.
     if is_owner(user_id):
+        user_state = record_user_name(sender, user_id)
+        if text in (ADMIN_MEMBERS_CMD, ADMIN_NOTIFY_CMD):
+            log("info", f"دستور مدیریتی «{text}» از user {user_id} — "
+                        f"owner_user_id={CFG.get('owner_user_id')} "
+                        f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗'}")
         if text == ADMIN_MEMBERS_CMD:
             if user_state.get("mode") in ("report", "deadline", "notify",
                                           "proof"):
@@ -1079,6 +1075,18 @@ def handle_update(update):
             return
         if user_state.get("mode") == "notify":
             handle_notify_text(message, user_id)
+            return
+    elif not is_support_sender(sender):
+        user_state = record_user_name(sender, user_id)
+
+    if is_support_sender(sender):
+        handled = False
+        try:
+            handled = handle_support_message(message, user_id)
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در پیام پشتیبان: {exc}")
+        # مالک هم پشتیبان است: پیام‌های غیر-تیکتِ او در جریان عادی ادامه می‌یابد
+        if handled or not is_owner(user_id):
             return
 
     if user_state.get("mode") == "report":
