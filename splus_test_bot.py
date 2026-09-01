@@ -960,6 +960,7 @@ def handle_notify_start(user_id):
     user_state["mode"] = "notify"
     save_state()
     send_with_retry(user_id, NOTIFY_ASK_TEXT)
+    log("info", f"درخواست اطلاع‌رسانی — admin {user_id} (در انتظار متن)")
 
 
 def handle_notify_text(message, user_id):
@@ -1023,6 +1024,9 @@ def handle_update(update):
     if user_id is None:
         return
 
+    preview = str(message.get("text") or "")[:40]
+    log("info", f"پیام دریافت شد — user {user_id} ({preview!r})")
+
     # یادگیری شناسهٔ عددی پشتیبان از اولین پیام خودش
     support_username = str(CFG.get("support_username") or "").lower()
     if (support_username
@@ -1055,6 +1059,10 @@ def handle_update(update):
     user_state = record_user_name(sender, user_id)
 
     # دستورات مدیریتی مالک (فقط تایپی) — اولویت روی حالت‌های دیگر
+    if text in (ADMIN_MEMBERS_CMD, ADMIN_NOTIFY_CMD):
+        log("info", f"دستور مدیریتی «{text}» از user {user_id} — "
+                    f"owner_user_id={CFG.get('owner_user_id')} "
+                    f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗ (نادیده گرفته شد)'}")
     if is_owner(user_id):
         if text == ADMIN_MEMBERS_CMD:
             if user_state.get("mode") in ("report", "deadline", "notify",
