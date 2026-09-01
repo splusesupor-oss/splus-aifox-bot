@@ -535,6 +535,7 @@ def handle_verify_callback(callback):
     except (NetworkError, BotError) as exc:
         log("warn", f"answerCallbackQuery ناموفق: {exc}")
     user_state = get_user_state(user_id)
+    record_user_name(user, user_id)
     if user_state["verified"]:
         show_main_menu(user_id, note="✅ عضویت شما از قبل تأیید شده است.")
         return
@@ -942,11 +943,20 @@ def handle_members_list(user_id):
         users.items(),
         key=lambda kv: int(kv[0]) if str(kv[0]).lstrip("-").isdigit() else 0,
     )
+    unknown = 0
     for index, (uid, record) in enumerate(ordered, 1):
         record = record if isinstance(record, dict) else {}
-        name = record.get("name") or "—"
+        name = record.get("name")
         mark = "✅" if record.get("verified") else "⬜"
-        lines.append(f"{fa(index)}. {name} — {uid} — {mark}")
+        if name:
+            lines.append(f"{fa(index)}. {name} — {mark}")
+        else:
+            unknown += 1
+            lines.append(f"{fa(index)}. {uid} — {mark}")
+    if unknown:
+        lines.append("")
+        lines.append(f"({fa(unknown)} کاربر هنوز نامی ثبت نشده؛ با اولین "
+                     f"پیامشان خودکار ثبت می‌شود)")
     text = "\n".join(lines)
     if len(text) > 4000:
         text = text[:4000] + "\n… (ادامهٔ لیست)"
