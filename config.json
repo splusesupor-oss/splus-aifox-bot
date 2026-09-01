@@ -8,5 +8,6 @@
   "site_url": "https://fox-bot.aifox-chat.workers.dev",
   "game_site_url": "https://fox-game.aifox-chat.workers.dev",
   "guide_channel_url": "https://splus.ir/Plunfox",
-  "group_expiry_file": "~/.local/share/soroush-bot/config/group_expiry.json"
+  "group_expiry_file": "~/.local/share/soroush-bot/config/group_expiry.json",
+  "owner_user_id": 69683268
 }

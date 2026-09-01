@@ -35,6 +35,10 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
   9. تمدید اشتراک -> هدایت به صفحهٔ خرید/تمدید سایت.
+  10. دستورات مدیریتی مالک (فقط تایپی؛ owner_user_id از config.json):
+      «دیدن اعضا» = لیست همه‌کسی که /start زده‌اند (نام، id، وضعیت تایید)؛
+      «اطلاع رسانی» = متن بعدی به پیوی همهٔ اعضا بازنشر می‌شود (مثل
+      اطلاع‌رسانی ربات اصلی) + گزارش تعداد موفق/خطا.
 
 زیرساخت:
   * getUpdates با Long Polling — بدون Webhook
@@ -147,6 +151,16 @@ DEADLINE_NOT_FOUND_FILE_TEXT = (
     "این ربات باید روی همان دستگاهی اجرا شود که ربات اصلی روی آن فعال "
     "است تا به فایل زندهٔ آن دسترسی داشته باشد."
 )
+
+MEMBERS_EMPTY_TEXT = "👥 هنوز کاربری استارت را نزده است."
+NOTIFY_ASK_TEXT = (
+    "📢 متن اطلاع‌رسانی را بفرستید تا به پیوی همهٔ اعضا ارسال شود.\n"
+    "(برای لغو: «انصراف»)"
+)
+NOTIFY_NO_USERS_TEXT = "📢 هنوز عضوی برای اطلاع‌رسانی وجود ندارد."
+CANCEL_TEXTS = ("انصراف", "لغو", "/cancel")
+ADMIN_MEMBERS_CMD = "دیدن اعضا"
+ADMIN_NOTIFY_CMD = "اطلاع رسانی"
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 
@@ -162,6 +176,7 @@ DEFAULT_CONFIG = {
     "game_site_url": "https://fox-game.aifox-chat.workers.dev",
     "guide_channel_url": "https://splus.ir/Plunfox",
     "group_expiry_file": "~/.local/share/soroush-bot/config/group_expiry.json",
+    "owner_user_id": 69683268,
 }
 
 CFG = dict(DEFAULT_CONFIG)
@@ -809,7 +824,7 @@ def handle_deadline_link(message, user_id):
         send_with_retry(user_id, DEADLINE_ASK_TEXT)
         return
 
-    if text in ("انصراف", "لغو", "/cancel"):
+    if text in CANCEL_TEXTS:
         user_state["mode"] = "main"
         save_state()
         show_main_menu(user_id)
@@ -896,6 +911,98 @@ def handle_menu_text(user_id, text):
 # مسیریابی update
 # ---------------------------------------------------------------------------
 
+def is_owner(user_id):
+    """فقط مالک ربات (owner_user_id از config.json) دستورات مدیریتی دارد."""
+    owner = CFG.get("owner_user_id")
+    try:
+        return owner is not None and int(owner) == int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def record_user_name(sender, user_id):
+    """نام فرستنده را در رکوردش ثبت می‌کند (برای لیست اعضا) + رکورد برمی‌گرداند."""
+    record = get_user_state(user_id)
+    first = str(sender.get("first_name") or "").strip()
+    username = str(sender.get("username") or "").strip()
+    name = (first + (f" (@{username})" if username else "")).strip()
+    if name:
+        record["name"] = name
+    return record
+
+
+def handle_members_list(user_id):
+    """دستور «دیدن اعضا» (مدیر): همه‌کسی که /start زده و وارد ربات شده."""
+    users = STATE.get("users") or {}
+    if not users:
+        send_with_retry(user_id, MEMBERS_EMPTY_TEXT)
+        return
+    lines = [f"👥 اعضای ربات ({fa(len(users))} نفر):"]
+    ordered = sorted(
+        users.items(),
+        key=lambda kv: int(kv[0]) if str(kv[0]).lstrip("-").isdigit() else 0,
+    )
+    for index, (uid, record) in enumerate(ordered, 1):
+        record = record if isinstance(record, dict) else {}
+        name = record.get("name") or "—"
+        mark = "✅" if record.get("verified") else "⬜"
+        lines.append(f"{fa(index)}. {name} — {uid} — {mark}")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n… (ادامهٔ لیست)"
+    send_with_retry(user_id, text)
+    log("info", f"لیست اعضا ({len(users)} نفر) ارسال شد — admin {user_id}")
+
+
+def handle_notify_start(user_id):
+    """دستور «اطلاع رسانی» (مدیر): درخواست متن بازنشر."""
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "notify"
+    save_state()
+    send_with_retry(user_id, NOTIFY_ASK_TEXT)
+
+
+def handle_notify_text(message, user_id):
+    """متن بعد از «اطلاع رسانی» -> ارسال PV به همهٔ اعضا (همان‌که استارت زده‌اند)."""
+    user_state = get_user_state(user_id)
+    text = (message.get("text") or "").strip()
+    if not text:
+        user_state["mode"] = "notify"
+        save_state()
+        send_with_retry(user_id, NOTIFY_ASK_TEXT)
+        return
+    if text in CANCEL_TEXTS:
+        user_state["mode"] = "main"
+        save_state()
+        show_main_menu(user_id)
+        return
+    user_state["mode"] = "main"
+    save_state()
+
+    users = STATE.get("users") or {}
+    if not users:
+        send_with_retry(user_id, NOTIFY_NO_USERS_TEXT)
+        return
+
+    ok = fail = 0
+    for uid in users:
+        try:
+            chat_id = int(uid)
+        except ValueError:
+            continue
+        try:
+            api_call("sendMessage", {"chat_id": chat_id, "text": text})
+            ok += 1
+        except (NetworkError, BotError) as exc:
+            fail += 1
+            log("warn", f"ارسال اطلاع‌رسانی به {chat_id} ناموفق: {exc}")
+    result = f"📢 اطلاع‌رسانی ارسال شد: {fa(ok)} نفر"
+    if fail:
+        result += f" — {fa(fail)} خطا"
+    send_with_retry(user_id, result)
+    log("info", f"اطلاع‌رسانی: {ok} موفق / {fail} خطا — admin {user_id}")
+
+
 def handle_update(update):
     """فقط پیام‌های PV پردازش می‌شوند؛ بقیه نادیده گرفته می‌شوند."""
     message = update.get("message")
@@ -926,7 +1033,7 @@ def handle_update(update):
         log("info", f"شناسهٔ پشتیبان ثبت شد: {user_id}")
 
     if is_start_message(message):
-        user_state = get_user_state(user_id)
+        user_state = record_user_name(sender, user_id)
         if user_state["verified"]:
             user_state["mode"] = "main"
             save_state()
@@ -945,7 +1052,26 @@ def handle_update(update):
         return
 
     text = (message.get("text") or "").strip()
-    user_state = get_user_state(user_id)
+    user_state = record_user_name(sender, user_id)
+
+    # دستورات مدیریتی مالک (فقط تایپی) — اولویت روی حالت‌های دیگر
+    if is_owner(user_id):
+        if text == ADMIN_MEMBERS_CMD:
+            if user_state.get("mode") in ("report", "deadline", "notify",
+                                          "proof"):
+                user_state["mode"] = "main"
+                save_state()
+            handle_members_list(user_id)
+            return
+        if text == ADMIN_NOTIFY_CMD:
+            if user_state.get("mode") in ("report", "deadline", "proof"):
+                user_state["mode"] = "main"
+                save_state()
+            handle_notify_start(user_id)
+            return
+        if user_state.get("mode") == "notify":
+            handle_notify_text(message, user_id)
+            return
 
     if user_state.get("mode") == "report":
         try:
