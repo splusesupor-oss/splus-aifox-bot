@@ -110,10 +110,11 @@ PURCHASE_MAIN_HTML = (
     "https://fox-bot.aifox-chat.workers.dev\n"
     "سایت خرید پلن ربات"
 )
-# نقل‌قول سروش: تگ blockquote فقط در MarkdownV2 (صورت > ) پشتیبانی می‌شود
-PURCHASE_QUOTE_MD = (
-    "> در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n"
-    "> @osine2"
+# نقل‌قول پشتیبانی: MarkdownV2 سروش کاراکتر '>' را رد می‌کند
+# (400: can't parse entities) — متن ساده فرستاده می‌شود
+PURCHASE_QUOTE_TEXT = (
+    "در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n"
+    "@osine2"
 )
 
 EXTEND_TEXT = (
@@ -886,7 +887,7 @@ def handle_menu_text(user_id, text):
         # پیام اصلی (HTML: فقط bold — تگ‌های غیرمستند مثل blockquote باعث
         # رد شدن کل پیام می‌شوند) + نقل‌قول پشتیبانی (MarkdownV2)
         send_with_retry(user_id, PURCHASE_MAIN_HTML, parse_mode="HTML")
-        send_with_retry(user_id, PURCHASE_QUOTE_MD, parse_mode="MarkdownV2")
+        send_with_retry(user_id, PURCHASE_QUOTE_TEXT)
         log("info", f"صفحهٔ خرید ارسال شد — user {user_id}")
     elif text == MENU_REPORT:
         user_state = get_user_state(user_id)
@@ -921,47 +922,65 @@ def is_owner(user_id):
         return False
 
 
+def sanitize_display_name(value):
+    """حذف کاراکترهای کنترل/غیرقابل‌چاپ — API پیام‌های پر از آن‌ها را رد می‌کند."""
+    return "".join(ch for ch in str(value) if ch.isprintable()).strip()
+
+
 def record_user_name(sender, user_id):
     """نام فرستنده را در رکوردش ثبت می‌کند (برای لیست اعضا) + رکورد برمی‌گرداند."""
     record = get_user_state(user_id)
-    first = str(sender.get("first_name") or "").strip()
-    username = str(sender.get("username") or "").strip()
+    first = sanitize_display_name(sender.get("first_name") or "")
+    username = sanitize_display_name(sender.get("username") or "")
     name = (first + (f" (@{username})" if username else "")).strip()
     if name:
         record["name"] = name
     return record
 
 
+MEMBERS_PAGE_SIZE = 40
+
+
 def handle_members_list(user_id):
-    """دستور «دیدن اعضا» (مدیر): همه‌کسی که /start زده و وارد ربات شده."""
+    """دستور «دیدن اعضا» (مدیر): همه‌کسی که /start زده و وارد ربات شده.
+
+    لیست به صفحه‌های کوچک تقسیم می‌شود (محدودیت طول پیام API سروش).
+    """
     users = STATE.get("users") or {}
     if not users:
         send_with_retry(user_id, MEMBERS_EMPTY_TEXT)
         return
-    lines = [f"👥 اعضای ربات ({fa(len(users))} نفر):"]
     ordered = sorted(
         users.items(),
         key=lambda kv: int(kv[0]) if str(kv[0]).lstrip("-").isdigit() else 0,
     )
-    unknown = 0
-    for index, (uid, record) in enumerate(ordered, 1):
-        record = record if isinstance(record, dict) else {}
-        name = record.get("name")
-        mark = "✅" if record.get("verified") else "⬜"
-        if name:
-            lines.append(f"{fa(index)}. {name} — {mark}")
+    pages = [ordered[i:i + MEMBERS_PAGE_SIZE]
+             for i in range(0, len(ordered), MEMBERS_PAGE_SIZE)]
+    for page_no, page in enumerate(pages, 1):
+        if len(pages) > 1:
+            header = (f"👥 اعضای ربات ({fa(len(ordered))} نفر) — "
+                      f"صفحهٔ {fa(page_no)} از {fa(len(pages))}:")
         else:
-            unknown += 1
-            lines.append(f"{fa(index)}. {uid} — {mark}")
-    if unknown:
-        lines.append("")
-        lines.append(f"({fa(unknown)} کاربر هنوز نامی ثبت نشده؛ با اولین "
-                     f"پیامشان خودکار ثبت می‌شود)")
-    text = "\n".join(lines)
-    if len(text) > 4000:
-        text = text[:4000] + "\n… (ادامهٔ لیست)"
-    send_with_retry(user_id, text)
-    log("info", f"لیست اعضا ({len(users)} نفر) ارسال شد — admin {user_id}")
+            header = f"👥 اعضای ربات ({fa(len(ordered))} نفر):"
+        lines = [header]
+        unknown = 0
+        for index, (uid, record) in enumerate(
+                page, (page_no - 1) * MEMBERS_PAGE_SIZE + 1):
+            record = record if isinstance(record, dict) else {}
+            name = record.get("name")
+            mark = "✅" if record.get("verified") else "⬜"
+            if name:
+                lines.append(f"{fa(index)}. {name} — {mark}")
+            else:
+                unknown += 1
+                lines.append(f"{fa(index)}. {uid} — {mark}")
+        if unknown:
+            lines.append("")
+            lines.append(f"({fa(unknown)} کاربر هنوز نامی ثبت نشده؛ با "
+                         f"اولین پیامشان خودکار ثبت می‌شود)")
+        send_with_retry(user_id, "\n".join(lines))
+    log("info", f"لیست اعضا ({len(ordered)} نفر، {len(pages)} صفحه) "
+                f"ارسال شد — admin {user_id}")
 
 
 def handle_notify_start(user_id):
