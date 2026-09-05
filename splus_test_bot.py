@@ -39,6 +39,10 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
       «دیدن اعضا» = لیست همه‌کسی که /start زده‌اند (نام، id، وضعیت تایید)؛
       «اطلاع رسانی» = متن بعدی به پیوی همهٔ اعضا بازنشر می‌شود (مثل
       اطلاع‌رسانی ربات اصلی) + گزارش تعداد موفق/خطا.
+  11. مسدودسازی (مدیر): «مسدود <اید عددی | @یوزرنیم>» /
+      «رفع مسدودی ...» (یا «آزاد ...») / «لیست مسدودشده‌ها».
+      کاربر مسدود هیچ پیامی پردازش نمی‌شود و فقط «🚫 مسدود شده‌اید»
+      می‌گیرد؛ لیست در data/ پایدار است. مالک هرگز مسدود نمی‌شود.
 
 زیرساخت:
   * getUpdates با Long Polling — بدون Webhook
@@ -162,6 +166,16 @@ NOTIFY_NO_USERS_TEXT = "📢 هنوز عضوی برای اطلاع‌رسانی 
 CANCEL_TEXTS = ("انصراف", "لغو", "/cancel")
 ADMIN_MEMBERS_CMD = "دیدن اعضا"
 ADMIN_NOTIFY_CMD = "اطلاع رسانی"
+ADMIN_BLOCK_PREFIX = "مسدود"
+ADMIN_UNBLOCK_PREFIXES = ("رفع مسدودی", "آزاد")
+ADMIN_BLOCKLIST_CMD = "لیست مسدودشده‌ها"
+BLOCK_TEXT = "🚫 شما از این ربات مسدود شده‌اید."
+BLOCK_USAGE_TEXT = (
+    "🚫 نحوهٔ استفاده:\n"
+    "مسدود <اید عددی>      مثال: مسدود 12345678\n"
+    "مسدود @یوزرنیم         مثال: مسدود @someuser\n"
+    "رفع مسدودی <اید یا @یوزرنیم>   (یا: آزاد ...)"
+)
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 
@@ -181,7 +195,7 @@ DEFAULT_CONFIG = {
 }
 
 CFG = dict(DEFAULT_CONFIG)
-STATE = {"learned": {}, "users": {}, "tickets": {}}
+STATE = {"learned": {}, "users": {}, "tickets": {}, "blocked": {}}
 
 
 class NetworkError(Exception):
@@ -389,13 +403,14 @@ def load_state():
             data.setdefault("learned", {})
             data.setdefault("users", {})
             data.setdefault("tickets", {})
+            data.setdefault("blocked", {})
             STATE = data
             return data
     except FileNotFoundError:
         pass
     except Exception as exc:
         log("error", f"خواندن وضعیت ذخیره‌شده ناموفق: {exc}")
-    STATE = {"learned": {}, "users": {}, "tickets": {}}
+    STATE = {"learned": {}, "users": {}, "tickets": {}, "blocked": {}}
     return STATE
 
 
@@ -1033,6 +1048,87 @@ def handle_notify_text(message, user_id):
     log("info", f"اطلاع‌رسانی: {ok} موفق / {fail} خطا — admin {user_id}")
 
 
+def is_blocked(sender):
+    """کاربر مسدود است؟ (اید عددی یا @یوزرنیم)"""
+    blocked = STATE.get("blocked") or {}
+    uid = sender.get("id")
+    if uid is not None and str(uid) in blocked:
+        return True
+    username = str(sender.get("username") or "").lower()
+    if username and f"@{username}" in blocked:
+        return True
+    return False
+
+
+def normalize_block_target(raw):
+    """هدف مسدودی را نرمال می‌کند: '123' -> '123' | '@user'/'user' -> '@user'."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("@"):
+        raw2 = raw[1:].strip()
+        if not raw2:
+            return None
+        return "@" + raw2.lower()
+    if raw.isdigit():
+        return str(int(raw))
+    if re.fullmatch(r"[A-Za-z0-9_]{3,32}", raw):
+        return "@" + raw.lower()
+    return None
+
+
+def handle_block_command(user_id, text):
+    """دستور «مسدود ...» (مدیر)."""
+    target = text[len(ADMIN_BLOCK_PREFIX):].strip()
+    key = normalize_block_target(target)
+    if key is None:
+        send_with_retry(user_id, BLOCK_USAGE_TEXT)
+        return
+    blocked = STATE.setdefault("blocked", {})
+    if key in blocked:
+        send_with_retry(user_id, f"⚠️ {key} از قبل مسدود است.")
+        return
+    blocked[key] = {"at": datetime.now().isoformat(timespec="seconds")}
+    save_state()
+    known = (STATE.get("users") or {}).get(key)
+    if isinstance(known, dict) and known.get("name"):
+        send_with_retry(user_id, f"🚫 {known['name']} ({key}) مسدود شد.")
+    else:
+        send_with_retry(user_id, f"🚫 {key} مسدود شد.")
+    log("info", f"مسدودی {key} — admin {user_id}")
+
+
+def handle_unblock_command(user_id, text):
+    """دستور «رفع مسدودی ...» / «آزاد ...» (مدیر)."""
+    prefix = next(p for p in ADMIN_UNBLOCK_PREFIXES if text.startswith(p))
+    key = normalize_block_target(text[len(prefix):].strip())
+    if key is None:
+        send_with_retry(user_id, BLOCK_USAGE_TEXT)
+        return
+    blocked = STATE.setdefault("blocked", {})
+    if key not in blocked:
+        send_with_retry(user_id, f"ℹ️ {key} در لیست مسدودی نبود.")
+        return
+    del blocked[key]
+    save_state()
+    send_with_retry(user_id, f"✅ {key} دیگر مسدود نیست.")
+    log("info", f"رفع مسدودی {key} — admin {user_id}")
+
+
+def handle_blocklist(user_id):
+    """دستور «لیست مسدودشده‌ها» (مدیر)."""
+    blocked = STATE.get("blocked") or {}
+    if not blocked:
+        send_with_retry(user_id, "🚫 هیچ کاربری مسدود نیست.")
+        return
+    lines = [f"🚫 کاربران مسدود ({fa(len(blocked))} نفر):"]
+    for index, key in enumerate(sorted(blocked), 1):
+        info = blocked[key]
+        when = info.get("at") if isinstance(info, dict) else None
+        lines.append(f"{fa(index)}. {key}" + (f"  (از {when})" if when else ""))
+    send_with_retry(user_id, "\n".join(lines))
+
+
 def handle_update(update):
     """فقط پیام‌های PV پردازش می‌شوند؛ بقیه نادیده گرفته می‌شوند."""
     message = update.get("message")
@@ -1055,6 +1151,11 @@ def handle_update(update):
 
     preview = str(message.get("text") or "")[:40]
     log("info", f"پیام دریافت شد — user {user_id} ({preview!r})")
+
+    # کاربران مسدود اصلاً نمی‌توانند با ربات پیام دهند (به جز مالک)
+    if not is_owner(user_id) and is_blocked(sender):
+        send_with_retry(user_id, BLOCK_TEXT)
+        return
 
     # یادگیری شناسهٔ عددی پشتیبان از اولین پیام خودش
     support_username = str(CFG.get("support_username") or "").lower()
@@ -1101,6 +1202,16 @@ def handle_update(update):
                 user_state["mode"] = "main"
                 save_state()
             handle_notify_start(user_id)
+            return
+        if text == ADMIN_BLOCK_PREFIX or text.startswith(ADMIN_BLOCK_PREFIX + " "):
+            handle_block_command(user_id, text)
+            return
+        if any(text == pfx or text.startswith(pfx + " ")
+               for pfx in ADMIN_UNBLOCK_PREFIXES):
+            handle_unblock_command(user_id, text)
+            return
+        if text == ADMIN_BLOCKLIST_CMD:
+            handle_blocklist(user_id)
             return
         if user_state.get("mode") == "notify":
             handle_notify_text(message, user_id)
