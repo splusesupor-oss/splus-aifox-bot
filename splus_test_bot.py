@@ -17,18 +17,9 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۳: سایت بازی روباه | کانال راهنما
   4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
-  5. مهلت باقی‌ماندهٔ گروه: فایل زندهٔ ربات اصلی group_expiry.json
-     (READ-ONLY، مسیر از config.json) — ساختار واقعی:
-     کلید = شناسهٔ عددی گروه، مقدار = {expires_at, title, ...}.
-     کاربر **لینک یا نام گروه یا شناسهٔ عددی** می‌فرستد:
-       a) id عددی -> کلید مستقیم
-       b) توکن لینک -> کلید (برای فرمت‌های کد/URL)
-       c) نام گروه -> تطبیق NFKC با title رکوردها (حروف استایلی
-          مثل 𝗚𝗿𝗼𝘂𝗽 هم با Group مطابقت می‌دهند)
-     Bot API لینک را به id تبدیل نمی‌کند؛ به همین دلیل (c) راهِ
-     اصلی است. اگر فایل از محیط اجرا قابل دسترسی نباشد، دقیقاً همین
-     را اعلام می‌کند (حدس نمی‌زند). این reader منبع مشترک «مهلت» و
-     «تمدید اشتراک» آینده است.
+  5. مهلت باقی‌ماندهٔ گروه -> پیام راهنما + دکمهٔ شیشه‌ای (inline URL)
+     سایت استعلام؛ کاربر در سایت، نام گروه یا لینک گروه خودش را در
+     قسمت استعلام وارد می‌کند (آدرس از config.json: deadline_site_url).
   6. سایت بازی روباه -> عکس + دکمهٔ inline URL
   7. کانال راهنما -> دکمهٔ inline URL
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
@@ -55,7 +46,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 import time
 import urllib.error
 import urllib.request
@@ -144,18 +134,11 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-DEADLINE_ASK_TEXT = (
-    "🔍 برای بررسی مهلت، نام دقیق گروه خود را بفرستید.\n"
-    "وارد گروه شوید و نام گروه (بالای صفحه) را کپی کنید و همین‌جا بفرستید.\n"
-    "(اگر لینک یا شناسهٔ عددی گروه را دارید، آن را هم می‌شود فرستاد)\n\n"
-    "برای لغو: «انصراف»"
+DEADLINE_SITE_TEXT = (
+    "برای دیدن مهلت باقی‌ماندهٔ گروه‌تون، وارد سایت زیر شوید و از قسمت "
+    "استعلام، نام گروه خودتون یا لینک گروه خودتون رو وارد کنید 👇"
 )
-DEADLINE_NOT_FOUND_FILE_TEXT = (
-    "⚠️ فایل اطلاعات اشتراک از این محیط قابل خواندن نیست (READ-ONLY):\n"
-    "{path}\n"
-    "این ربات باید روی همان دستگاهی اجرا شود که ربات اصلی روی آن فعال "
-    "است تا به فایل زندهٔ آن دسترسی داشته باشد."
-)
+DEADLINE_BUTTON_TEXT = "🌐 ورود به سایت استعلام مهلت گروه"
 
 MEMBERS_EMPTY_TEXT = "👥 هنوز کاربری استارت را نزده است."
 NOTIFY_ASK_TEXT = (
@@ -189,8 +172,8 @@ DEFAULT_CONFIG = {
     "support_username": "osine2",
     "site_url": "https://fox-bot.aifox-chat.workers.dev",
     "game_site_url": "https://fox-game.aifox-chat.workers.dev",
+    "deadline_site_url": "https://fox-robah.aifox-bot.workers.dev/",
     "guide_channel_url": "https://splus.ir/Plunfox",
-    "group_expiry_file": "~/.local/share/soroush-bot/config/group_expiry.json",
     "owner_user_id": 37858988,
 }
 
@@ -672,71 +655,8 @@ def send_guide_channel(user_id):
 
 
 # ---------------------------------------------------------------------------
-# دادهٔ اشتراک: reader مشترک (READ-ONLY) برای «مهلت» و «تمدید» آینده
+# مهلت گروه -> دکمهٔ سایت استعلام
 # ---------------------------------------------------------------------------
-
-def group_expiry_path():
-    """مسیر فایل زندهٔ ربات اصلی — از config.json (قابل تغییر بدون کد)."""
-    raw = str(CFG.get("group_expiry_file")
-              or "~/.local/share/soroush-bot/config/group_expiry.json")
-    return os.path.expanduser(raw)
-
-
-def load_group_expiry():
-    """فقط READ: خواندن group_expiry.json (group_id -> expires_at).
-
-    برمی‌گرداند (data, path, error):
-      error=None -> data دیکشنوری معتبر است
-      error='not-found' | 'invalid' | 'error: ...'
-    هیچ تغییری در فایل اعمال نمی‌شود.
-    """
-    path = group_expiry_path()
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except FileNotFoundError:
-        return None, path, "not-found"
-    except Exception as exc:
-        return None, path, f"error: {exc}"
-    if not isinstance(data, dict) or not data:
-        return None, path, "invalid"
-    return data, path, None
-
-
-def parse_expiry(value):
-    """expires_at را (epoch/ISO/تاریخ رایج) به datetime محلی تبدیل می‌کند.
-    اگر هیچ فرمت شناخته‌شده‌ای نباشد، None برمی‌گرداند (حدس نمی‌زند)."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        ts = float(value)
-        if ts > 1e12:  # epoch میلی‌ثانیه
-            ts /= 1000.0
-        try:
-            return datetime.fromtimestamp(ts)
-        except Exception:
-            return None
-    if isinstance(value, str):
-        s = value.strip()
-        if not s:
-            return None
-        if s.lstrip("-").isdigit():
-            return parse_expiry(int(s))
-        try:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-            if dt.tzinfo is not None:
-                dt = dt.astimezone().replace(tzinfo=None)
-            return dt
-        except Exception:
-            pass
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S",
-                    "%Y/%m/%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
-            try:
-                return datetime.strptime(s, fmt)
-            except Exception:
-                continue
-    return None
-
 
 FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
@@ -745,156 +665,13 @@ def fa(num):
     return str(num).translate(FA_DIGITS)
 
 
-def format_remaining(total_seconds):
-    total_minutes = max(int(round(total_seconds / 60.0)), 1)
-    days, rem = divmod(total_minutes, 24 * 60)
-    hours, minutes = divmod(rem, 60)
-    if days > 0:
-        return f"{fa(days)} روز و {fa(hours)} ساعت"
-    if hours > 0:
-        return f"{fa(hours)} ساعت و {fa(minutes)} دقیقه"
-    return f"{fa(minutes)} دقیقه"
-
-
-def deadline_candidates(text):
-    """توکن‌های قابل‌تطبیق از متن کاربر: پادشالک URLs + ایدهای خام."""
-    candidates = []
-    for url in re.findall(r"https?://[^\s]+", text):
-        tail = url.split("://", 1)[-1]
-        segments = [seg for seg in tail.split("/") if seg]
-        token = segments[-1].strip().lower() if segments else ""
-        if token and token not in candidates:
-            candidates.append(token)
-    for num in re.findall(r"(?<!\d)-?\d{5,}(?!\d)", text):
-        if num not in candidates:
-            candidates.append(num)
-    return candidates
-
-
-def resolve_group_key(candidates, expiry):
-    """اولین کلید فایل که با یکی از توکن‌ها مطابقت دارد (وگرنه None).
-
-    سطوح تطبیق: ۱) معادل دقیق کلید  ۲) معادل عددی کلید  ۳) کلیدهای
-    URL-کامل (توکن داخل کلید). اگر کلیدهای فایل فرمت دیگری دارند،
-    فقط همین تابع جای اصلاح است.
-    """
-    for cand in candidates:
-        if cand in expiry:
-            return cand
-    for cand in candidates:
-        if cand.lstrip("-").isdigit():
-            for key in expiry:
-                if str(key).strip().lstrip("-").isdigit() and \
-                        int(str(key).strip().lstrip("-")) == int(cand.lstrip("-")):
-                    return key
-    for cand in candidates:
-        for key in expiry:
-            if cand and cand in str(key).lower():
-                return key
-    return None
-
-
-def _norm_title(s):
-    """نرمال‌سازی عنوان: NFKC (حروف استایلی -> معمولی) + کوچک + فاصله‌یکتا."""
-    s = unicodedata.normalize("NFKC", str(s))
-    return re.sub(r"\s+", " ", s).strip().lower()
-
-
-def resolve_group_title(text, expiry):
-    """تطبیق **نام** گروه (بخش غیر-لینکِ پیام) با عنوان رکوردها.
-
-    کلیدهای group_expiry.json شناسهٔ عددی هستند و Bot API لینک را به
-    id تبدیل نمی‌کند؛ اما هر رکورد title دارد، پس نام گروه راهِ
-    کاربریِ اصلی است. تطبیق: دقیق / جزئی، بعد از نرمال‌سازی NFKC.
-    """
-    query = _norm_title(re.sub(r"https?://[^\s]+", " ", text))
-    if len(query) < 3:
-        return None
-    for key, record in expiry.items():
-        title = record.get("title") if isinstance(record, dict) else None
-        if not title:
-            continue
-        normalized = _norm_title(title)
-        if normalized and (query == normalized or query in normalized
-                           or normalized in query):
-            return key
-    return None
-
-
-def handle_group_deadline(user_id):
-    """کلیک «⏳ مهلت باقی‌مانده گروه» -> درخواست لینک/نام گروه."""
-    user_state = get_user_state(user_id)
-    user_state["mode"] = "deadline"
-    save_state()
-    send_with_retry(user_id, DEADLINE_ASK_TEXT)
-
-
-def handle_deadline_link(message, user_id):
-    """لینک گروه -> خواندن READ-ONLY فایل -> نمایش وضعیت اشتراک."""
-    user_state = get_user_state(user_id)
-    text = (message.get("text") or "").strip()
-
-    if not text:
-        # پیام بدون متن (مثلاً استیکر): دوباره درخواست
-        user_state["mode"] = "deadline"
-        save_state()
-        send_with_retry(user_id, DEADLINE_ASK_TEXT)
-        return
-
-    if text in CANCEL_TEXTS:
-        user_state["mode"] = "main"
-        save_state()
-        show_main_menu(user_id)
-        return
-
-    user_state["mode"] = "main"
-    save_state()
-
-    expiry, path, err = load_group_expiry()
-    if err == "not-found":
-        log("warn", f"group_expiry.json پیدا نشد: {path}")
-        send_with_retry(user_id,
-                        DEADLINE_NOT_FOUND_FILE_TEXT.format(path=path))
-        show_main_menu(user_id)
-        return
-    if err:
-        log("error", f"خواندن group_expiry ناموفق: {err} ({path})")
-        send_with_retry(user_id, f"⚠️ خواندن فایل اطلاعات اشتراک ناموفق بود:\n{err}")
-        show_main_menu(user_id)
-        return
-
-    candidates = deadline_candidates(text)
-    key = resolve_group_key(candidates, expiry) if candidates else None
-    if key is None:
-        key = resolve_group_title(text, expiry)
-    if key is None:
-        sample = [(k, rec.get("title") if isinstance(rec, dict) else None)
-                  for k, rec in list(expiry.items())[:3]]
-        log("warn", f"مهلت گروه: تطبیق نشد — candidates={candidates}, "
-                    f"متن: {text[:50]!r} | نمونهٔ کلیدها/عناوین: {sample} | "
-                    f"user {user_id} (file: {path})")
-        send_with_retry(user_id, "❌ این گروه در سیستم ثبت نشده است.")
-        show_main_menu(user_id)
-        return
-
-    record = expiry.get(key)
-    raw_expiry = record.get("expires_at") if isinstance(record, dict) else record
-    dt = parse_expiry(raw_expiry)
-    if dt is None:
-        log("error", f"expires_at گروه {key} قابل خواندن نیست: "
-                     f"{expiry.get(key)!r}")
-        send_with_retry(user_id, "⚠️ تاریخ انقضای این گروه قابل خواندن نیست.")
-        show_main_menu(user_id)
-        return
-
-    remaining = (dt - datetime.now()).total_seconds()
-    if remaining <= 0:
-        send_with_retry(user_id, "⛔ اشتراک این گروه به پایان رسیده است.")
-    else:
-        send_with_retry(user_id,
-                        f"⏳ مهلت باقی‌مانده: {format_remaining(remaining)}")
-        log("info", f"مهلت گروه {key}: {format_remaining(remaining)} — user {user_id}")
-    show_main_menu(user_id)
+def send_deadline_site(user_id):
+    """«⏳ مهلت باقی‌مانده گروه» -> متن راهنما + دکمهٔ شیشه‌ای (inline URL)."""
+    keyboard = {"inline_keyboard": [
+        [{"text": DEADLINE_BUTTON_TEXT, "url": CFG["deadline_site_url"]}],
+    ]}
+    send_with_retry(user_id, DEADLINE_SITE_TEXT, reply_markup=keyboard)
+    log("info", f"دکمهٔ سایت استعلام مهلت ارسال شد — user {user_id}")
 
 
 def handle_menu_text(user_id, text):
@@ -914,7 +691,7 @@ def handle_menu_text(user_id, text):
                         reply_markup=site_inline_keyboard())
         log("info", f"پیام تمدید ارسال شد — user {user_id}")
     elif text == MENU_DEADLINE:
-        handle_group_deadline(user_id)
+        send_deadline_site(user_id)
     elif text == MENU_GAME:
         send_game_site(user_id)
     elif text == MENU_GUIDE:
@@ -1191,14 +968,13 @@ def handle_update(update):
                         f"owner_user_id={CFG.get('owner_user_id')} "
                         f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗'}")
         if text == ADMIN_MEMBERS_CMD:
-            if user_state.get("mode") in ("report", "deadline", "notify",
-                                          "proof"):
+            if user_state.get("mode") in ("report", "notify", "proof"):
                 user_state["mode"] = "main"
                 save_state()
             handle_members_list(user_id)
             return
         if text == ADMIN_NOTIFY_CMD:
-            if user_state.get("mode") in ("report", "deadline", "proof"):
+            if user_state.get("mode") in ("report", "proof"):
                 user_state["mode"] = "main"
                 save_state()
             handle_notify_start(user_id)
@@ -1234,13 +1010,6 @@ def handle_update(update):
             handle_report(message, user_id)
         except (NetworkError, BotError) as exc:
             log("error", f"خطا در ثبت گزارش: {exc}")
-        return
-
-    if user_state.get("mode") == "deadline":
-        try:
-            handle_deadline_link(message, user_id)
-        except (NetworkError, BotError) as exc:
-            log("error", f"خطا در بررسی مهلت گروه: {exc}")
         return
 
     if not user_state.get("verified"):
