@@ -87,6 +87,7 @@ MENU_EXTEND = "🔄 تمدید اشتراک ربات"
 MENU_DEADLINE = "⏳ مهلت باقی‌مانده گروه"
 MENU_GAME = "🎮 سایت بازی روباه"
 MENU_GUIDE = "📚 کانال راهنما"
+MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 
 PURCHASE_MAIN_HTML = (
@@ -163,6 +164,7 @@ BLOCK_USAGE_TEXT = (
 )
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
+MINIAPP_BUTTON_TEXT = "🚀 ورود به روباه پلاس"
 
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
@@ -176,6 +178,7 @@ DEFAULT_CONFIG = {
     "game_site_url": "https://fox-game.aifox-chat.workers.dev",
     "deadline_site_url": "https://fox-robah.aifox-bot.workers.dev/",
     "guide_channel_url": "https://splus.ir/Plunfox",
+    "miniapp_url": "https://ai-fox.aifox-bot.workers.dev/",
     "owner_user_id": 37858988,
 }
 
@@ -449,11 +452,12 @@ def start_inline_keyboard():
 
 
 def main_reply_keyboard():
-    """۲ دکمه در هر ردیف، ۳ ردیف (مطابق چیدمان خواسته‌شده)."""
+    """۲ دکمه در هر ردیف، ۴ ردیف (مطابق چیدمان خواسته‌شده)."""
     return {"keyboard": [
         [MENU_BUY, MENU_REPORT],
         [MENU_EXTEND, MENU_DEADLINE],
         [MENU_GAME, MENU_GUIDE],
+        [MENU_MINIAPP],
     ], "resize_keyboard": True}
 
 
@@ -656,6 +660,49 @@ def send_guide_channel(user_id):
     log("info", f"دکمهٔ کانال راهنما ارسال شد — user {user_id}")
 
 
+def send_miniapp(user_id):
+    """دکمهٔ inline URL برنامک روباه پلاس."""
+    keyboard = {"inline_keyboard": [
+        [{"text": MINIAPP_BUTTON_TEXT, "url": CFG["miniapp_url"]}],
+    ]}
+    send_with_retry(user_id,
+                    "🚀 روباه پلاس — برنامک سروش‌پلاس\n\n"
+                    "با کلیک روی دکمهٔ زیر، برنامک روباه پلاس داخل سروش‌پلاس باز می‌شود.\n"
+                    "همهٔ بازی‌ها، کیف پول و امکانات در یک‌جا!\n",
+                    reply_markup=keyboard)
+    log("info", f"دکمهٔ برنامک روباه پلاس ارسال شد — user {user_id}")
+
+
+def set_menu_button_to_miniapp():
+    """تنظیم دکمهٔ منوی بات (کنار ورودی پیام) تا مستقیماً برنامک را باز کند.
+    
+    اگر سروش‌پلاس از این متد پشتیبانی کند، دکمهٔ منو مستقیماً برنامک را باز می‌کند.
+    در غیر این صورت، کاربر می‌تواند از دکمهٔ «روباه پلاس» در منوی اصلی استفاده کند.
+    """
+    miniapp_url = CFG.get("miniapp_url", "")
+    if not miniapp_url:
+        log("warn", "آدرس برنامک (miniapp_url) تنظیم نشده — رد شدن از تنظیم دکمه منو")
+        return
+    
+    # تلاش برای تنظیم دکمه منوی بات
+    # اگر سروش‌پلاس از setChatMenuButton پشتیبانی کند
+    try:
+        menu_button = {
+            "type": "web_app",
+            "text": "🦊 روباه پلاس",
+            "web_app": {"url": miniapp_url}
+        }
+        api_call("setChatMenuButton", {
+            "menu_button": menu_button
+        })
+        log("info", f"✅ دکمهٔ منوی بات به برنامک تنظیم شد: {miniapp_url}")
+    except BotError as exc:
+        log("warn", f"تنظیم دکمه منو با setChatMenuButton پشتیبانی نمی‌شود: {exc}")
+        log("info", "ℹ️ کاربر می‌تواند از دکمه «روباه پلاس» در منوی اصلی استفاده کند")
+    except NetworkError as exc:
+        log("warn", f"خطای شبکه هنگام تنظیم دکمه منو: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # مهلت گروه -> دکمهٔ سایت استعلام
 # ---------------------------------------------------------------------------
@@ -698,6 +745,8 @@ def handle_menu_text(user_id, text):
         send_game_site(user_id)
     elif text == MENU_GUIDE:
         send_guide_channel(user_id)
+    elif text == MENU_MINIAPP:
+        send_miniapp(user_id)
     else:
         # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
         show_main_menu(user_id)
@@ -1064,7 +1113,10 @@ def main():
             attempt += 1
             wait_backoff(attempt - 1, f"اتصال নে هنگام getMe ({exc})")
 
-    # --- ۲) حلقهٔ اصلی: long polling با getUpdates ------------------------
+    # --- ۲.۵) تنظیم دکمهٔ منوی بات به برنامک روباه پلاس ----------------
+    set_menu_button_to_miniapp()
+
+    # --- ۳) حلقهٔ اصلی: long polling با getUpdates ------------------------
     log("info", "ورود به حلقهٔ getUpdates (long polling) ...  برای خروج Ctrl+C")
     offset = 0
     attempt = 0
