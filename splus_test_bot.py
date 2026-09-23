@@ -89,6 +89,11 @@ MENU_GAME = "🎮 سایت بازی روباه"
 MENU_GUIDE = "📚 کانال راهنما"
 MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
+# نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
+# یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
+# کلاینت کش می‌شود و فقط با ارسال دوبارهٔ reply_markup عوض می‌شود).
+MENU_KEYBOARD_VERSION = 2
+MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «روباه پلاس» اضافه شد)."
 
 PURCHASE_MAIN_HTML = (
     "<b>🎉 پلن خرید اشتراک روباه</b>\n\n"
@@ -499,6 +504,25 @@ def send_start_page(user_id):
 def show_main_menu(user_id, note=None):
     text = (note + "\n\n" if note else "") + MAIN_MENU_TEXT
     send_with_retry(user_id, text, reply_markup=main_reply_keyboard())
+    user_state = get_user_state(user_id)
+    if user_state.get("kb_version") != MENU_KEYBOARD_VERSION:
+        user_state["kb_version"] = MENU_KEYBOARD_VERSION
+        save_state()
+
+
+def ensure_menu_keyboard_fresh(user_id):
+    """اگر کاربر قدیمی هنوز کیبورد نسخهٔ قبلی را دارد، منوی جدید را می‌فرستد.
+
+    کاربرانی که قبل از اضافه‌شدن دکمهٔ «روباه پلاس» ربات را داشتند، هرگز
+    reply_markup جدید را دریافت نکرده بودند (فقط در /start ارسال می‌شد)؛
+    بنابراین با اولین پیام بعدی، کیبورد به‌روز برایشان ارسال می‌شود.
+    """
+    user_state = get_user_state(user_id)
+    if user_state.get("kb_version") == MENU_KEYBOARD_VERSION:
+        return False
+    show_main_menu(user_id, note=MENU_UPDATED_NOTE)
+    log("info", f"کیبورد منو برای کاربر قدیمی به‌روز شد — user {user_id}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1071,6 +1095,8 @@ def handle_update(update):
         return
 
     try:
+        # کاربران قدیمی: کیبورد کش‌شده‌شان دکمهٔ جدید را ندارد → ارسال منوی تازه
+        ensure_menu_keyboard_fresh(user_id)
         handle_menu_text(user_id, text)
     except (NetworkError, BotError) as exc:
         log("error", f"خطا در منوی اصلی: {exc}")
