@@ -697,6 +697,52 @@ def send_miniapp(user_id):
     log("info", f"دکمهٔ برنامک روباه پلاس ارسال شد — user {user_id}")
 
 
+BOT_COMMANDS = [
+    {"command": "start", "description": "🦊 شروع / نمایش منوی اصلی"},
+    {"command": "app", "description": "🚀 ورود به روباه پلاس (برنامک)"},
+    {"command": "menu", "description": "📋 نمایش دوبارهٔ منوی اصلی"},
+    {"command": "buy", "description": "💎 خرید / تمدید اشتراک ربات"},
+    {"command": "game", "description": "🎮 سایت بازی روباه"},
+    {"command": "guide", "description": "📚 کانال راهنما"},
+    {"command": "support", "description": "🎧 ارسال گزارش به پشتیبانی"},
+]
+
+
+def register_bot_commands():
+    """ثبت فهرست دستورات بات (دکمهٔ آبی «منو» کنار کادر پیام — مثل BotFather).
+
+    این دکمه سمت کلاینت است و به کش کیبورد ربطی ندارد؛ بنابراین برای کاربران
+    قدیمی و جدید یکسان نمایش داده می‌شود.
+    """
+    try:
+        api_call("setMyCommands", {"commands": BOT_COMMANDS})
+        log("info", f"✅ فهرست دستورات بات ثبت شد ({len(BOT_COMMANDS)} دستور)")
+    except BotError as exc:
+        log("warn", f"setMyCommands پشتیبانی نشد: {exc}")
+    except NetworkError as exc:
+        log("warn", f"خطای شبکه هنگام setMyCommands: {exc}")
+
+
+def handle_slash_command(user_id, text):
+    """دستورهای اسلش‌دار منوی آبی. True اگر پردازش شد."""
+    cmd = text.split()[0].lower().split("@")[0] if text.startswith("/") else ""
+    if cmd == "/app":
+        send_miniapp(user_id)
+    elif cmd == "/menu":
+        show_main_menu(user_id)
+    elif cmd == "/buy":
+        handle_menu_text(user_id, MENU_BUY)
+    elif cmd == "/game":
+        send_game_site(user_id)
+    elif cmd == "/guide":
+        send_guide_channel(user_id)
+    elif cmd == "/support":
+        handle_menu_text(user_id, MENU_REPORT)
+    else:
+        return False
+    return True
+
+
 def set_menu_button_to_miniapp():
     """تنظیم دکمهٔ منوی بات (کنار ورودی پیام) تا مستقیماً برنامک را باز کند.
     
@@ -1097,6 +1143,8 @@ def handle_update(update):
     try:
         # کاربران قدیمی: کیبورد کش‌شده‌شان دکمهٔ جدید را ندارد → ارسال منوی تازه
         ensure_menu_keyboard_fresh(user_id)
+        if handle_slash_command(user_id, text):
+            return
         handle_menu_text(user_id, text)
     except (NetworkError, BotError) as exc:
         log("error", f"خطا در منوی اصلی: {exc}")
@@ -1140,6 +1188,7 @@ def main():
             wait_backoff(attempt - 1, f"اتصال নে هنگام getMe ({exc})")
 
     # --- ۲.۵) تنظیم دکمهٔ منوی بات به برنامک روباه پلاس ----------------
+    register_bot_commands()
     set_menu_button_to_miniapp()
 
     # --- ۳) حلقهٔ اصلی: long polling با getUpdates ------------------------
