@@ -15,6 +15,7 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۱: خرید ربات | ارسال گزارش به پشتیبانی
      ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
      ردیف ۳: سایت بازی روباه | کانال راهنما
+     ردیف ۴: روباه پلاس (برنامک) | خرید تبلیغات
   4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
   5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
@@ -22,6 +23,8 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      می‌فرستند تا ربات مهلت باقی‌مانده را نشان دهد.
   6. سایت بازی روباه -> عکس + دکمهٔ inline URL
   7. کانال راهنما -> دکمهٔ inline URL
+  7.5 خرید تبلیغات -> عکس «روباه تبلیغ‌گر» + دکمهٔ شیشه‌ای «سایت خرید
+      تبلیغات» (آدرس از ads_site_url در config.json)
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
@@ -77,6 +80,7 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "pv_state.json"
 WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
 GAME_PHOTO = BASE_DIR / "assets" / "game_site.jpg"
+ADS_PHOTO = BASE_DIR / "assets" / "ads_site.jpg"
 
 START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
 
@@ -88,12 +92,13 @@ MENU_DEADLINE = "⏳ مهلت باقی‌مانده گروه"
 MENU_GAME = "🎮 سایت بازی روباه"
 MENU_GUIDE = "📚 کانال راهنما"
 MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
+MENU_ADS = "📣 خرید تبلیغات"
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 # نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
 # یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
 # کلاینت کش می‌شود و فقط با ارسال دوبارهٔ reply_markup عوض می‌شود).
-MENU_KEYBOARD_VERSION = 2
-MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «روباه پلاس» اضافه شد)."
+MENU_KEYBOARD_VERSION = 3
+MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «خرید تبلیغات» اضافه شد)."
 
 PURCHASE_MAIN_HTML = (
     "<b>🎉 پلن خرید اشتراک روباه</b>\n\n"
@@ -223,6 +228,12 @@ BLOCK_USAGE_TEXT = (
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 MINIAPP_BUTTON_TEXT = "🚀 ورود به روباه پلاس"
+ADS_BUTTON_TEXT = "📣 سایت خرید تبلیغات"
+ADS_CAPTION = (
+    "📣 روباه تبلیغ‌گر\n\n"
+    "تبلیغ خود را در شبکهٔ روباه ثبت کنید و دیده شوید!\n"
+    "برای ثبت سفارش و مشاهدهٔ تعرفه‌ها، دکمهٔ زیر را بزنید 👇"
+)
 
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
@@ -236,6 +247,7 @@ DEFAULT_CONFIG = {
     "game_site_url": "https://ai-fox.aifox-bot.workers.dev/",
     "deadline_site_url": "https://fox-robah.aifox-bot.workers.dev/",
     "guide_channel_url": "https://splus.ir/Plunfox",
+    "ads_site_url": "https://soroush-ads.osine2.workers.dev/",
     "miniapp_url": "https://ai-fox.aifox-bot.workers.dev/",
     "owner_user_id": 37858988,
 }
@@ -639,7 +651,7 @@ def main_reply_keyboard():
         [MENU_BUY, MENU_REPORT],
         [MENU_EXTEND, MENU_DEADLINE],
         [MENU_GAME, MENU_GUIDE],
-        [MENU_MINIAPP],
+        [MENU_MINIAPP, MENU_ADS],
     ], "resize_keyboard": True}
 
 
@@ -857,6 +869,34 @@ def send_game_site(user_id):
     send_with_retry(user_id, GAME_BUTTON_TEXT, reply_markup=keyboard)
 
 
+def send_ads_site(user_id):
+    """«📣 خرید تبلیغات» -> عکس روباه تبلیغ‌گر + دکمهٔ شیشه‌ای سایت تبلیغات."""
+    keyboard = {"inline_keyboard": [
+        [{"text": ADS_BUTTON_TEXT, "url": CFG["ads_site_url"]}],
+    ]}
+    if ADS_PHOTO.exists():
+        try:
+            data = ADS_PHOTO.read_bytes()
+            fields = [
+                ("chat_id", str(user_id)),
+                ("caption", ADS_CAPTION),
+                ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+            ]
+            api_call_multipart(
+                "sendPhoto", fields,
+                [("photo", ADS_PHOTO.name, data, "image/jpeg")],
+            )
+            log("info", f"عکس + دکمهٔ خرید تبلیغات ارسال شد — user {user_id}")
+            return
+        except NetworkError as exc:
+            log("warn", f"sendPhoto تبلیغات ناموفق ({exc}) — ارسال متنی")
+        except BotError as exc:
+            log("error", f"sendPhoto تبلیغات خطا داد: {exc} — ارسال متنی")
+    # جایگزین بدون عکس (فایل موجود نیست یا آپلود شکست خورد)
+    send_with_retry(user_id, ADS_CAPTION, reply_markup=keyboard)
+    log("info", f"پیام متنی خرید تبلیغات ارسال شد — user {user_id}")
+
+
 def send_guide_channel(user_id):
     """دکمهٔ inline URL کانال راهنما."""
     keyboard = {"inline_keyboard": [
@@ -886,6 +926,7 @@ BOT_COMMANDS = [
     {"command": "menu", "description": "📋 نمایش دوبارهٔ منوی اصلی"},
     {"command": "buy", "description": "💎 خرید / تمدید اشتراک ربات"},
     {"command": "game", "description": "🎮 سایت بازی روباه"},
+    {"command": "ads", "description": "📣 خرید تبلیغات"},
     {"command": "guide", "description": "📚 کانال راهنما"},
     {"command": "support", "description": "🎧 ارسال گزارش به پشتیبانی"},
 ]
@@ -917,6 +958,8 @@ def handle_slash_command(user_id, text):
         handle_menu_text(user_id, MENU_BUY)
     elif cmd == "/game":
         send_game_site(user_id)
+    elif cmd == "/ads":
+        send_ads_site(user_id)
     elif cmd == "/guide":
         send_guide_channel(user_id)
     elif cmd == "/support":
@@ -997,6 +1040,8 @@ def handle_menu_text(user_id, text):
         send_guide_channel(user_id)
     elif text == MENU_MINIAPP:
         send_miniapp(user_id)
+    elif text == MENU_ADS:
+        send_ads_site(user_id)
     else:
         # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
         show_main_menu(user_id)
