@@ -177,9 +177,32 @@ NOTIFY_USE_BUTTONS_TEXT = (
     "(یا «انصراف» را بفرستید)."
 )
 NOTIFY_STARTED_TEXT = "🚀 ارسال اطلاع‌رسانی آغاز شد…"
+NOTIFY_ALL_CALLBACK = "notify_all"
+NOTIFY_ALL_BTN = "👥 همهٔ اعضا"
+NOTIFY_COUNT_ASK_TEXT = (
+    "🔢 به چند نفر ارسال شود؟\n"
+    "عدد را بفرستید (مثلاً ۲۰۸) یا دکمهٔ «👥 همهٔ اعضا» را بزنید.\n"
+    "کل اعضای فعلی: {total} نفر\n\n"
+    "ℹ️ اگر ارسال به کسی خطا بخورد، ربات سراغ نفر بعدی می‌رود تا دقیقاً "
+    "{example} ارسال موفق کامل شود.\n"
+    "(برای لغو: «انصراف»)"
+)
+NOTIFY_COUNT_BAD_TEXT = (
+    "⚠️ لطفاً فقط یک عدد صحیح بزرگ‌تر از صفر بفرستید (مثلاً ۲۰۸) "
+    "یا دکمهٔ «👥 همهٔ اعضا» را بزنید."
+)
+NOTIFY_COUNT_CAPPED_TEXT = (
+    "ℹ️ عدد درخواستی ({want}) از تعداد اعضا ({total}) بیشتر است؛ "
+    "به همهٔ {total} عضو ارسال می‌شود."
+)
+NOTIFY_PARTIAL_TEXT = (
+    "⚠️ فقط {ok} ارسال موفق انجام شد (هدف: {want}) — اعضای قابل‌ارسال تمام شدند."
+)
 
 # پیام اطلاع‌رسانیِ در انتظار تایید — {owner_id: message dict}
 PENDING_NOTIFY = {}
+# تعداد گیرندگانِ انتخاب‌شده — {owner_id: int}
+NOTIFY_LIMIT = {}
 CANCEL_TEXTS = ("انصراف", "لغو", "/cancel")
 ADMIN_MEMBERS_CMD = "دیدن اعضا"
 ADMIN_NOTIFY_CMD = "اطلاع رسانی"
@@ -427,6 +450,27 @@ def notify_confirm_keyboard():
         {"text": NOTIFY_CONFIRM_BTN, "callback_data": NOTIFY_CONFIRM_CALLBACK},
         {"text": NOTIFY_CANCEL_BTN, "callback_data": NOTIFY_CANCEL_CALLBACK},
     ]]}
+
+
+def notify_count_keyboard(total):
+    """دکمهٔ شیشه‌ای «همهٔ اعضا» + لغو، برای مرحلهٔ انتخاب تعداد."""
+    return {"inline_keyboard": [[
+        {"text": f"{NOTIFY_ALL_BTN} ({fa(total)})",
+         "callback_data": NOTIFY_ALL_CALLBACK},
+        {"text": NOTIFY_CANCEL_BTN, "callback_data": NOTIFY_CANCEL_CALLBACK},
+    ]]}
+
+
+def parse_count(text):
+    """عدد فارسی/عربی/انگلیسی -> int مثبت. در غیر این صورت None."""
+    digits = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+    cleaned = str(text or "").translate(digits).strip()
+    cleaned = cleaned.replace(",", "").replace("،", "").replace(" ", "")
+    cleaned = cleaned.replace("نفر", "").strip()
+    if not cleaned.isdigit():
+        return None
+    value = int(cleaned)
+    return value if value > 0 else None
 
 
 def deliver_preserving_format(target_chat_id, message):
@@ -1013,8 +1057,42 @@ def handle_notify_start(user_id):
     log("info", f"درخواست اطلاع‌رسانی — admin {user_id} (در انتظار متن)")
 
 
+def notify_ask_count(user_id, total):
+    """مرحلهٔ ۲: پرسیدن تعداد گیرندگان."""
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "notify_count"
+    save_state()
+    send_with_retry(
+        user_id,
+        NOTIFY_COUNT_ASK_TEXT.format(total=fa(total), example=fa(min(208, total))),
+        reply_markup=notify_count_keyboard(total),
+    )
+
+
+def notify_ask_confirm(user_id, limit, total):
+    """مرحلهٔ ۳: پیش‌نمایش + دکمه‌های تایید/لغو."""
+    message = PENDING_NOTIFY.get(user_id)
+    if message is None:
+        send_with_retry(user_id, NOTIFY_EXPIRED_TEXT)
+        return
+    NOTIFY_LIMIT[user_id] = limit
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "notify_confirm"
+    save_state()
+    send_with_retry(user_id, NOTIFY_PREVIEW_TEXT)
+    deliver_preserving_format(user_id, message)
+    scope = (f"همهٔ {fa(total)} عضو" if limit >= total
+             else f"{fa(limit)} نفر از {fa(total)} عضو")
+    send_with_retry(
+        user_id,
+        f"این پیام برای {scope} ارسال شود؟",
+        reply_markup=notify_confirm_keyboard(),
+    )
+    log("info", f"پیش‌نمایش اطلاع‌رسانی — admin {user_id}، هدف {limit}/{total}")
+
+
 def handle_notify_text(message, user_id):
-    """متن بعد از «اطلاع رسانی» -> پیش‌نمایش + گرفتن تایید با دکمهٔ شیشه‌ای."""
+    """متن بعد از «اطلاع رسانی» -> پرسیدن تعداد گیرندگان."""
     user_state = get_user_state(user_id)
     text = (message.get("text") or "").strip()
     has_media = any(k in message for k in
@@ -1027,6 +1105,7 @@ def handle_notify_text(message, user_id):
         return
     if text in CANCEL_TEXTS:
         PENDING_NOTIFY.pop(user_id, None)
+        NOTIFY_LIMIT.pop(user_id, None)
         user_state["mode"] = "main"
         save_state()
         show_main_menu(user_id)
@@ -1041,25 +1120,49 @@ def handle_notify_text(message, user_id):
 
     # پیام را نگه می‌داریم تا بعد از تایید، عیناً بازنشر شود
     PENDING_NOTIFY[user_id] = message
-    user_state["mode"] = "notify_confirm"
-    save_state()
-
-    send_with_retry(user_id, NOTIFY_PREVIEW_TEXT)
-    deliver_preserving_format(user_id, message)
-    send_with_retry(
-        user_id,
-        f"این پیام برای {fa(len(users))} عضو ارسال شود؟",
-        reply_markup=notify_confirm_keyboard(),
-    )
-    log("info", f"پیش‌نمایش اطلاع‌رسانی برای admin {user_id} (در انتظار تایید)")
+    notify_ask_count(user_id, len(users))
 
 
-def run_notify_broadcast(owner_id, message):
-    """ارسال واقعی اطلاع‌رسانی به همهٔ اعضا با حفظ قالب‌بندی."""
-    users = STATE.get("users") or {}
+def handle_notify_count(message, user_id):
+    """عدد گیرندگان را می‌گیرد و می‌رود سراغ پیش‌نمایش/تایید."""
+    user_state = get_user_state(user_id)
+    text = (message.get("text") or "").strip()
+    if text in CANCEL_TEXTS:
+        PENDING_NOTIFY.pop(user_id, None)
+        NOTIFY_LIMIT.pop(user_id, None)
+        user_state["mode"] = "main"
+        save_state()
+        send_with_retry(user_id, NOTIFY_CANCELLED_TEXT)
+        show_main_menu(user_id)
+        return
+
+    total = len(STATE.get("users") or {})
+    want = parse_count(text)
+    if want is None:
+        send_with_retry(user_id, NOTIFY_COUNT_BAD_TEXT,
+                        reply_markup=notify_count_keyboard(total))
+        return
+    if want > total:
+        send_with_retry(user_id, NOTIFY_COUNT_CAPPED_TEXT.format(
+            want=fa(want), total=fa(total)))
+        want = total
+    notify_ask_confirm(user_id, want, total)
+
+
+def run_notify_broadcast(owner_id, message, limit=None):
+    """ارسال اطلاع‌رسانی تا رسیدن به «limit» ارسالِ موفق.
+
+    خطاها شمرده می‌شوند ولی جای یک ارسال موفق را نمی‌گیرند: اگر ارسال به
+    کسی شکست بخورد سراغ نفر بعدی می‌رویم تا دقیقاً به تعداد خواسته‌شده
+    ارسال موفق برسیم (تا جایی که عضو باقی باشد).
+    """
+    users = list((STATE.get("users") or {}).keys())
+    target = len(users) if limit is None else min(limit, len(users))
     ok = fail = 0
     methods = {}
-    for uid in list(users):
+    for uid in users:
+        if ok >= target:
+            break
         try:
             chat_id = int(uid)
         except (TypeError, ValueError):
@@ -1070,18 +1173,23 @@ def run_notify_broadcast(owner_id, message):
         else:
             ok += 1
             methods[method] = methods.get(method, 0) + 1
+
     result = f"📢 اطلاع‌رسانی ارسال شد: {fa(ok)} نفر"
+    if limit is not None:
+        result += f" (هدف: {fa(target)})"
     if fail:
-        result += f" — {fa(fail)} خطا"
+        result += f"\n↩️ {fa(fail)} ارسال ناموفق رد شد و جایگزین شد"
     if methods:
         result += "\n🛠 روش ارسال: " + "، ".join(
             f"{k}: {fa(v)}" for k, v in methods.items())
+    if ok < target:
+        result += "\n" + NOTIFY_PARTIAL_TEXT.format(ok=fa(ok), want=fa(target))
     send_with_retry(owner_id, result)
-    log("info", f"اطلاع‌رسانی: {ok} موفق / {fail} خطا — admin {owner_id}")
+    log("info", f"اطلاع‌رسانی: {ok}/{target} موفق، {fail} خطا — admin {owner_id}")
 
 
 def handle_notify_callback(callback):
-    """دکمه‌های شیشه‌ای «تایید ارسال» / «لغو» — فقط برای مالک."""
+    """دکمه‌های شیشه‌ای اطلاع‌رسانی — فقط برای مالک."""
     cb_id = callback.get("id")
     data = callback.get("data")
     sender = callback.get("from") or {}
@@ -1122,6 +1230,7 @@ def handle_notify_callback(callback):
 
     if data == NOTIFY_CANCEL_CALLBACK:
         PENDING_NOTIFY.pop(user_id, None)
+        NOTIFY_LIMIT.pop(user_id, None)
         user_state["mode"] = "main"
         save_state()
         answer("لغو شد")
@@ -1130,7 +1239,19 @@ def handle_notify_callback(callback):
         log("info", f"اطلاع‌رسانی لغو شد — admin {user_id}")
         return
 
+    if data == NOTIFY_ALL_CALLBACK:
+        total = len(STATE.get("users") or {})
+        if user_id not in PENDING_NOTIFY or total == 0:
+            answer(NOTIFY_EXPIRED_TEXT, alert=True)
+            return
+        answer(f"همهٔ {total} عضو")
+        edit(f"👥 گیرندگان: همهٔ {fa(total)} عضو")
+        notify_ask_confirm(user_id, total, total)
+        return
+
+    # تایید ارسال
     pending = PENDING_NOTIFY.pop(user_id, None)
+    limit = NOTIFY_LIMIT.pop(user_id, None)
     user_state["mode"] = "main"
     save_state()
     if pending is None:
@@ -1138,7 +1259,7 @@ def handle_notify_callback(callback):
         return
     answer("در حال ارسال…")
     edit(NOTIFY_STARTED_TEXT)
-    run_notify_broadcast(user_id, pending)
+    run_notify_broadcast(user_id, pending, limit)
 
 
 def is_blocked(sender):
@@ -1234,7 +1355,8 @@ def handle_update(update):
             except (NetworkError, BotError) as exc:
                 log("error", f"خطا در callback: {exc}")
         elif callback and data in (NOTIFY_CONFIRM_CALLBACK,
-                                   NOTIFY_CANCEL_CALLBACK):
+                                   NOTIFY_CANCEL_CALLBACK,
+                                   NOTIFY_ALL_CALLBACK):
             try:
                 handle_notify_callback(callback)
             except (NetworkError, BotError) as exc:
@@ -1292,14 +1414,16 @@ def handle_update(update):
                         f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗'}")
         if text == ADMIN_MEMBERS_CMD:
             if user_state.get("mode") in ("report", "notify", "proof",
-                                          "notify_confirm"):
+                                          "notify_confirm", "notify_count"):
                 user_state["mode"] = "main"
                 save_state()
             handle_members_list(user_id)
             return
         if text == ADMIN_NOTIFY_CMD:
             PENDING_NOTIFY.pop(user_id, None)
-            if user_state.get("mode") in ("report", "proof", "notify_confirm"):
+            NOTIFY_LIMIT.pop(user_id, None)
+            if user_state.get("mode") in ("report", "proof", "notify_confirm",
+                                          "notify_count"):
                 user_state["mode"] = "main"
                 save_state()
             handle_notify_start(user_id)
@@ -1317,10 +1441,14 @@ def handle_update(update):
         if user_state.get("mode") == "notify":
             handle_notify_text(message, user_id)
             return
+        if user_state.get("mode") == "notify_count":
+            handle_notify_count(message, user_id)
+            return
         if user_state.get("mode") == "notify_confirm":
             # تایید فقط با دکمهٔ شیشه‌ای؛ ولی «انصراف» تایپی هم کار می‌کند
             if text in CANCEL_TEXTS:
                 PENDING_NOTIFY.pop(user_id, None)
+                NOTIFY_LIMIT.pop(user_id, None)
                 user_state["mode"] = "main"
                 save_state()
                 send_with_retry(user_id, NOTIFY_CANCELLED_TEXT)
