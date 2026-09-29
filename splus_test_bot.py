@@ -17,9 +17,9 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۳: سایت بازی روباه | کانال راهنما
   4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
      پشتیبانی (MarkdownV2: > )
-  5. مهلت باقی‌ماندهٔ گروه -> پیام راهنما + دکمهٔ شیشه‌ای (inline URL)
-     سایت استعلام؛ کاربر در سایت، نام گروه یا لینک گروه خودش را در
-     قسمت استعلام وارد می‌کند (آدرس از config.json: deadline_site_url).
+  5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
+     خریداران ربات (مالک یا ادمین) دستور «مهلت گروه» را داخل گروه
+     می‌فرستند تا ربات مهلت باقی‌مانده را نشان دهد.
   6. سایت بازی روباه -> عکس + دکمهٔ inline URL
   7. کانال راهنما -> دکمهٔ inline URL
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
@@ -140,13 +140,11 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
+# HTML: فقط bold (مثل PURCHASE_MAIN_HTML)
 DEADLINE_SITE_TEXT = (
-    "برای دیدن مهلت باقی‌ماندهٔ گروه‌تون، وارد سایت زیر شوید و از قسمت "
-    "استعلام، نام گروه خودتون یا لینک گروه خودتون رو وارد کنید 👇\n"
-    "\n"
-    "⛔ مستقیم روی سایت کلیک نکنید سایت رو کپی کنید و داخل مرورگر باز کنید"
+    "<b>🔸 اگر ربات روباه رو خریدد و مالک یا ادمین هستید داخل گروه دستور "
+    "«مهلت گروه» را بفرستید ربات نمایش خواهد داد چقدر دیگر مهلت مانده</b>"
 )
-DEADLINE_BUTTON_TEXT = "🌐 ورود به سایت استعلام مهلت گروه"
 
 MEMBERS_EMPTY_TEXT = "👥 هنوز کاربری استارت را نزده است."
 NOTIFY_ASK_TEXT = (
@@ -180,7 +178,7 @@ DEFAULT_CONFIG = {
     "group_title": "گروه روباه",
     "support_username": "osine2",
     "site_url": "https://fox-bot.aifox-chat.workers.dev",
-    "game_site_url": "https://fox-game.aifox-chat.workers.dev",
+    "game_site_url": "https://ai-fox.aifox-bot.workers.dev/",
     "deadline_site_url": "https://fox-robah.aifox-bot.workers.dev/",
     "guide_channel_url": "https://splus.ir/Plunfox",
     "miniapp_url": "https://ai-fox.aifox-bot.workers.dev/",
@@ -785,12 +783,9 @@ def fa(num):
 
 
 def send_deadline_site(user_id):
-    """«⏳ مهلت باقی‌مانده گروه» -> متن راهنما + دکمهٔ شیشه‌ای (inline URL)."""
-    keyboard = {"inline_keyboard": [
-        [{"text": DEADLINE_BUTTON_TEXT, "url": CFG["deadline_site_url"]}],
-    ]}
-    send_with_retry(user_id, DEADLINE_SITE_TEXT, reply_markup=keyboard)
-    log("info", f"دکمهٔ سایت استعلام مهلت ارسال شد — user {user_id}")
+    """«⏳ مهلت باقی‌مانده گروه» -> متن راهنمای Bold (بدون دکمه)."""
+    send_with_retry(user_id, DEADLINE_SITE_TEXT, parse_mode="HTML")
+    log("info", f"متن راهنمای مهلت گروه ارسال شد — user {user_id}")
 
 
 def handle_menu_text(user_id, text):
