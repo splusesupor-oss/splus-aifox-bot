@@ -123,10 +123,22 @@ EXTEND_TEXT = (
     "برای تمدید اشتراک خود طی کنید."
 )
 
-REPORT_PROMPT_TEXT = (
-    "🎧 گزارش یا پیام خود را همین‌جا ارسال کنید تا برای پشتیبانی "
-    "(@osine2) ارسال شود."
+REPORT_LINE_MAIN = (
+    "🎧 گزارش یا پیام خود را همین‌جا ارسال کنید تا برای پشتیبانی ارسال شود"
 )
+REPORT_LINE_WARN = (
+    "⚠️ - ارسال موارد بی مربوط و تکراری و یا توهین و فحاشی "
+    "باعث مسدودی شما از ربات خواهد شد"
+)
+# تلاش ۱: خط هشدار هم Bold و هم داخل نقل‌قول شیشه‌ای (blockquote)
+REPORT_PROMPT_HTML_QUOTE = (
+    f"{REPORT_LINE_MAIN}\n\n<blockquote><b>{REPORT_LINE_WARN}</b></blockquote>"
+)
+# تلاش ۲ (fallback): فقط Bold — اگر سرور سروش‌پلاس blockquote را رد کند
+REPORT_PROMPT_HTML_BOLD = f"{REPORT_LINE_MAIN}\n\n<b>{REPORT_LINE_WARN}</b>"
+# تلاش ۳ (fallback): متن ساده بدون parse_mode
+REPORT_PROMPT_PLAIN = f"{REPORT_LINE_MAIN}\n\n{REPORT_LINE_WARN}"
+REPORT_PROMPT_TEXT = REPORT_PROMPT_PLAIN  # سازگاری با کد قدیمی
 REPORT_OK_TEXT = (
     "✅ گزارش شما برای پشتیبانی ارسال شد.\n"
     "هرگاه پشتیبان روی همان گزارش Reply کند، پاسخ را همین‌جا دریافت می‌کنید."
@@ -152,6 +164,22 @@ NOTIFY_ASK_TEXT = (
     "(برای لغو: «انصراف»)"
 )
 NOTIFY_NO_USERS_TEXT = "📢 هنوز عضوی برای اطلاع‌رسانی وجود ندارد."
+NOTIFY_CONFIRM_CALLBACK = "notify_send"
+NOTIFY_CANCEL_CALLBACK = "notify_cancel"
+NOTIFY_PREVIEW_TEXT = "👁 پیش‌نمایش پیام (دقیقاً به همین شکل به اعضا می‌رسد):"
+NOTIFY_CONFIRM_BTN = "✅ تایید ارسال"
+NOTIFY_CANCEL_BTN = "❌ لغو"
+NOTIFY_CANCELLED_TEXT = "❌ ارسال اطلاع‌رسانی لغو شد."
+NOTIFY_EXPIRED_TEXT = "⚠️ پیامی برای ارسال پیدا نشد؛ دوباره «اطلاع رسانی» را بزنید."
+NOTIFY_ONLY_OWNER_TEXT = "⛔️ فقط مالک ربات می‌تواند این دکمه‌ها را بزند."
+NOTIFY_USE_BUTTONS_TEXT = (
+    "لطفاً با دکمه‌های «✅ تایید ارسال» یا «❌ لغو» زیر پیش‌نمایش پاسخ دهید "
+    "(یا «انصراف» را بفرستید)."
+)
+NOTIFY_STARTED_TEXT = "🚀 ارسال اطلاع‌رسانی آغاز شد…"
+
+# پیام اطلاع‌رسانیِ در انتظار تایید — {owner_id: message dict}
+PENDING_NOTIFY = {}
 CANCEL_TEXTS = ("انصراف", "لغو", "/cancel")
 ADMIN_MEMBERS_CMD = "دیدن اعضا"
 ADMIN_NOTIFY_CMD = "اطلاع رسانی"
@@ -361,6 +389,91 @@ def send_with_retry(chat_id, text, *, parse_mode=None, reply_markup=None,
                 return False
     log("error", f"ارسال پیام بعد از {attempts} تلاش ناموفق بود (chat {chat_id})")
     return False
+
+
+def send_report_prompt(chat_id):
+    """پیام راهنمای «ارسال گزارش» با fallback سه‌مرحله‌ای.
+
+    ۱) blockquote + bold (HTML)  ->  ۲) فقط bold (HTML)  ->  ۳) متن ساده
+    اگر سرور سروش‌پلاس تگ blockquote را نشناسد (400: can't parse entities /
+    unsupported tag) خودکار به مرحلهٔ بعد سقوط می‌کند.
+    """
+    attempts = (
+        ("blockquote+bold", REPORT_PROMPT_HTML_QUOTE, "HTML"),
+        ("bold", REPORT_PROMPT_HTML_BOLD, "HTML"),
+        ("plain", REPORT_PROMPT_PLAIN, None),
+    )
+    for label, text, mode in attempts:
+        params = {"chat_id": chat_id, "text": text}
+        if mode:
+            params["parse_mode"] = mode
+        try:
+            api_call("sendMessage", params)
+            log("info", f"پیام راهنمای گزارش ارسال شد ({label}) — chat {chat_id}")
+            return True
+        except BotError as exc:
+            log("warn", f"راهنمای گزارش «{label}» رد شد: {exc}")
+            continue
+        except NetworkError as exc:
+            log("warn", f"خطای شبکه در راهنمای گزارش ({label}): {exc}")
+            continue
+    log("error", f"ارسال راهنمای گزارش کامل ناموفق بود — chat {chat_id}")
+    return False
+
+
+def notify_confirm_keyboard():
+    """دو دکمهٔ شیشه‌ای تایید/لغو اطلاع‌رسانی."""
+    return {"inline_keyboard": [[
+        {"text": NOTIFY_CONFIRM_BTN, "callback_data": NOTIFY_CONFIRM_CALLBACK},
+        {"text": NOTIFY_CANCEL_BTN, "callback_data": NOTIFY_CANCEL_CALLBACK},
+    ]]}
+
+
+def deliver_preserving_format(target_chat_id, message):
+    """پیام مالک را با حفظ کامل قالب‌بندی (Bold، نقل‌قول و…) بازنشر می‌کند.
+
+    ترتیب تلاش: copyMessage  ->  sendMessage + entities  ->  متن ساده.
+    نام روش موفق برمی‌گردد؛ در صورت شکست کامل "failed".
+    """
+    src_chat = (message.get("chat") or {}).get("id")
+    message_id = message.get("message_id")
+    text = message.get("text") or message.get("caption") or ""
+    entities = message.get("entities") or message.get("caption_entities")
+
+    # ۱) copyMessage — قالب‌بندی و مدیا را عیناً منتقل می‌کند
+    if src_chat is not None and message_id is not None:
+        try:
+            api_call("copyMessage", {
+                "chat_id": target_chat_id,
+                "from_chat_id": src_chat,
+                "message_id": message_id,
+            })
+            return "copyMessage"
+        except (NetworkError, BotError) as exc:
+            log("warn", f"copyMessage برای {target_chat_id} نشد: {exc}")
+
+    if not text:
+        return "failed"
+
+    # ۲) sendMessage + entities — قالب‌بندی دقیقاً با آفست‌های اصلی
+    if entities:
+        try:
+            api_call("sendMessage", {
+                "chat_id": target_chat_id,
+                "text": text,
+                "entities": json.dumps(entities, ensure_ascii=False),
+            })
+            return "entities"
+        except (NetworkError, BotError) as exc:
+            log("warn", f"entities برای {target_chat_id} نشد: {exc}")
+
+    # ۳) متن ساده
+    try:
+        api_call("sendMessage", {"chat_id": target_chat_id, "text": text})
+        return "plain"
+    except (NetworkError, BotError) as exc:
+        log("warn", f"ارسال ساده برای {target_chat_id} نشد: {exc}")
+    return "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +912,7 @@ def handle_menu_text(user_id, text):
         user_state = get_user_state(user_id)
         user_state["mode"] = "report"
         save_state()
-        send_with_retry(user_id, REPORT_PROMPT_TEXT)
+        send_report_prompt(user_id)
     elif text == MENU_EXTEND:
         send_with_retry(user_id, EXTEND_TEXT,
                         reply_markup=site_inline_keyboard())
@@ -901,44 +1014,131 @@ def handle_notify_start(user_id):
 
 
 def handle_notify_text(message, user_id):
-    """متن بعد از «اطلاع رسانی» -> ارسال PV به همهٔ اعضا (همان‌که استارت زده‌اند)."""
+    """متن بعد از «اطلاع رسانی» -> پیش‌نمایش + گرفتن تایید با دکمهٔ شیشه‌ای."""
     user_state = get_user_state(user_id)
     text = (message.get("text") or "").strip()
-    if not text:
+    has_media = any(k in message for k in
+                    ("photo", "video", "document", "audio", "voice", "sticker",
+                     "animation", "caption"))
+    if not text and not has_media:
         user_state["mode"] = "notify"
         save_state()
         send_with_retry(user_id, NOTIFY_ASK_TEXT)
         return
     if text in CANCEL_TEXTS:
+        PENDING_NOTIFY.pop(user_id, None)
         user_state["mode"] = "main"
         save_state()
         show_main_menu(user_id)
         return
-    user_state["mode"] = "main"
-    save_state()
 
     users = STATE.get("users") or {}
     if not users:
+        user_state["mode"] = "main"
+        save_state()
         send_with_retry(user_id, NOTIFY_NO_USERS_TEXT)
         return
 
+    # پیام را نگه می‌داریم تا بعد از تایید، عیناً بازنشر شود
+    PENDING_NOTIFY[user_id] = message
+    user_state["mode"] = "notify_confirm"
+    save_state()
+
+    send_with_retry(user_id, NOTIFY_PREVIEW_TEXT)
+    deliver_preserving_format(user_id, message)
+    send_with_retry(
+        user_id,
+        f"این پیام برای {fa(len(users))} عضو ارسال شود؟",
+        reply_markup=notify_confirm_keyboard(),
+    )
+    log("info", f"پیش‌نمایش اطلاع‌رسانی برای admin {user_id} (در انتظار تایید)")
+
+
+def run_notify_broadcast(owner_id, message):
+    """ارسال واقعی اطلاع‌رسانی به همهٔ اعضا با حفظ قالب‌بندی."""
+    users = STATE.get("users") or {}
     ok = fail = 0
-    for uid in users:
+    methods = {}
+    for uid in list(users):
         try:
             chat_id = int(uid)
-        except ValueError:
+        except (TypeError, ValueError):
             continue
-        try:
-            api_call("sendMessage", {"chat_id": chat_id, "text": text})
-            ok += 1
-        except (NetworkError, BotError) as exc:
+        method = deliver_preserving_format(chat_id, message)
+        if method == "failed":
             fail += 1
-            log("warn", f"ارسال اطلاع‌رسانی به {chat_id} ناموفق: {exc}")
+        else:
+            ok += 1
+            methods[method] = methods.get(method, 0) + 1
     result = f"📢 اطلاع‌رسانی ارسال شد: {fa(ok)} نفر"
     if fail:
         result += f" — {fa(fail)} خطا"
-    send_with_retry(user_id, result)
-    log("info", f"اطلاع‌رسانی: {ok} موفق / {fail} خطا — admin {user_id}")
+    if methods:
+        result += "\n🛠 روش ارسال: " + "، ".join(
+            f"{k}: {fa(v)}" for k, v in methods.items())
+    send_with_retry(owner_id, result)
+    log("info", f"اطلاع‌رسانی: {ok} موفق / {fail} خطا — admin {owner_id}")
+
+
+def handle_notify_callback(callback):
+    """دکمه‌های شیشه‌ای «تایید ارسال» / «لغو» — فقط برای مالک."""
+    cb_id = callback.get("id")
+    data = callback.get("data")
+    sender = callback.get("from") or {}
+    user_id = sender.get("id")
+    cb_message = callback.get("message") or {}
+    chat_id = (cb_message.get("chat") or {}).get("id") or user_id
+    message_id = cb_message.get("message_id")
+
+    def answer(text="", alert=False):
+        params = {"callback_query_id": cb_id}
+        if text:
+            params["text"] = text
+        if alert:
+            params["show_alert"] = True
+        try:
+            api_call("answerCallbackQuery", params)
+        except (NetworkError, BotError) as exc:
+            log("warn", f"answerCallbackQuery نشد: {exc}")
+
+    # فقط مالک اجازهٔ زدن این دکمه‌ها را دارد
+    if not is_owner(user_id):
+        answer(NOTIFY_ONLY_OWNER_TEXT, alert=True)
+        log("warn", f"تلاش غیرمجاز برای دکمهٔ اطلاع‌رسانی — user {user_id}")
+        return
+
+    def edit(text):
+        if message_id is None:
+            send_with_retry(chat_id, text)
+            return
+        try:
+            api_call("editMessageText", {
+                "chat_id": chat_id, "message_id": message_id, "text": text,
+            })
+        except (NetworkError, BotError):
+            send_with_retry(chat_id, text)
+
+    user_state = get_user_state(user_id)
+
+    if data == NOTIFY_CANCEL_CALLBACK:
+        PENDING_NOTIFY.pop(user_id, None)
+        user_state["mode"] = "main"
+        save_state()
+        answer("لغو شد")
+        edit(NOTIFY_CANCELLED_TEXT)
+        show_main_menu(user_id)
+        log("info", f"اطلاع‌رسانی لغو شد — admin {user_id}")
+        return
+
+    pending = PENDING_NOTIFY.pop(user_id, None)
+    user_state["mode"] = "main"
+    save_state()
+    if pending is None:
+        answer(NOTIFY_EXPIRED_TEXT, alert=True)
+        return
+    answer("در حال ارسال…")
+    edit(NOTIFY_STARTED_TEXT)
+    run_notify_broadcast(user_id, pending)
 
 
 def is_blocked(sender):
@@ -1027,11 +1227,18 @@ def handle_update(update):
     message = update.get("message")
     if message is None:
         callback = update.get("callback_query")
-        if callback and callback.get("data") == VERIFY_CALLBACK:
+        data = (callback or {}).get("data")
+        if callback and data == VERIFY_CALLBACK:
             try:
                 handle_verify_callback(callback)
             except (NetworkError, BotError) as exc:
                 log("error", f"خطا در callback: {exc}")
+        elif callback and data in (NOTIFY_CONFIRM_CALLBACK,
+                                   NOTIFY_CANCEL_CALLBACK):
+            try:
+                handle_notify_callback(callback)
+            except (NetworkError, BotError) as exc:
+                log("error", f"خطا در callback اطلاع‌رسانی: {exc}")
         return
 
     chat = message.get("chat") or {}
@@ -1084,13 +1291,15 @@ def handle_update(update):
                         f"owner_user_id={CFG.get('owner_user_id')} "
                         f"-> {'مالک ✓' if is_owner(user_id) else 'مالک نیست ✗'}")
         if text == ADMIN_MEMBERS_CMD:
-            if user_state.get("mode") in ("report", "notify", "proof"):
+            if user_state.get("mode") in ("report", "notify", "proof",
+                                          "notify_confirm"):
                 user_state["mode"] = "main"
                 save_state()
             handle_members_list(user_id)
             return
         if text == ADMIN_NOTIFY_CMD:
-            if user_state.get("mode") in ("report", "proof"):
+            PENDING_NOTIFY.pop(user_id, None)
+            if user_state.get("mode") in ("report", "proof", "notify_confirm"):
                 user_state["mode"] = "main"
                 save_state()
             handle_notify_start(user_id)
@@ -1107,6 +1316,17 @@ def handle_update(update):
             return
         if user_state.get("mode") == "notify":
             handle_notify_text(message, user_id)
+            return
+        if user_state.get("mode") == "notify_confirm":
+            # تایید فقط با دکمهٔ شیشه‌ای؛ ولی «انصراف» تایپی هم کار می‌کند
+            if text in CANCEL_TEXTS:
+                PENDING_NOTIFY.pop(user_id, None)
+                user_state["mode"] = "main"
+                save_state()
+                send_with_retry(user_id, NOTIFY_CANCELLED_TEXT)
+                show_main_menu(user_id)
+                return
+            send_with_retry(user_id, NOTIFY_USE_BUTTONS_TEXT)
             return
     elif not is_support_sender(sender):
         user_state = record_user_name(sender, user_id)
