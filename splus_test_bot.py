@@ -177,6 +177,10 @@ NOTIFY_USE_BUTTONS_TEXT = (
     "(یا «انصراف» را بفرستید)."
 )
 NOTIFY_STARTED_TEXT = "🚀 ارسال اطلاع‌رسانی آغاز شد…"
+NOTIFY_PROGRESS_TEXT = "🚀 در حال ارسال… {ok}/{target} ({percent}٪)"
+NOTIFY_PROGRESS_EVERY = 25          # هر چند ارسال موفق، پیام پیشرفت به‌روز شود
+NOTIFY_SEND_DELAY = 0.05            # فاصلهٔ کوتاه بین ارسال‌ها (ضد فلاد)
+NOTIFY_SKIPPED_BLOCKED_TEXT = "🚫 {n} کاربر مسدود از فهرست گیرندگان کنار گذاشته شد"
 NOTIFY_ALL_CALLBACK = "notify_all"
 NOTIFY_ALL_BTN = "👥 همهٔ اعضا"
 NOTIFY_COUNT_ASK_TEXT = (
@@ -484,15 +488,33 @@ def deliver_preserving_format(target_chat_id, message):
     text = message.get("text") or message.get("caption") or ""
     entities = message.get("entities") or message.get("caption_entities")
 
+    def call(method, params):
+        """یک تلاش، با احترام به retry_after سرور (کنترل فلاد)."""
+        for _ in range(3):
+            try:
+                api_call(method, params)
+                return True
+            except BotError as exc:
+                if exc.retry_after:
+                    log("warn", f"محدودیت نرخ — {exc.retry_after} ثانیه صبر")
+                    time.sleep(min(exc.retry_after, 60))
+                    continue
+                raise
+            except NetworkError as exc:
+                log("warn", f"خطای شبکه ({method}): {exc} — تلاش دوباره")
+                time.sleep(2)
+                continue
+        return False
+
     # ۱) copyMessage — قالب‌بندی و مدیا را عیناً منتقل می‌کند
     if src_chat is not None and message_id is not None:
         try:
-            api_call("copyMessage", {
+            if call("copyMessage", {
                 "chat_id": target_chat_id,
                 "from_chat_id": src_chat,
                 "message_id": message_id,
-            })
-            return "copyMessage"
+            }):
+                return "copyMessage"
         except (NetworkError, BotError) as exc:
             log("warn", f"copyMessage برای {target_chat_id} نشد: {exc}")
 
@@ -502,19 +524,19 @@ def deliver_preserving_format(target_chat_id, message):
     # ۲) sendMessage + entities — قالب‌بندی دقیقاً با آفست‌های اصلی
     if entities:
         try:
-            api_call("sendMessage", {
+            if call("sendMessage", {
                 "chat_id": target_chat_id,
                 "text": text,
                 "entities": json.dumps(entities, ensure_ascii=False),
-            })
-            return "entities"
+            }):
+                return "entities"
         except (NetworkError, BotError) as exc:
             log("warn", f"entities برای {target_chat_id} نشد: {exc}")
 
     # ۳) متن ساده
     try:
-        api_call("sendMessage", {"chat_id": target_chat_id, "text": text})
-        return "plain"
+        if call("sendMessage", {"chat_id": target_chat_id, "text": text}):
+            return "plain"
     except (NetworkError, BotError) as exc:
         log("warn", f"ارسال ساده برای {target_chat_id} نشد: {exc}")
     return "failed"
@@ -762,8 +784,11 @@ def handle_support_message(message, support_user_id):
 
 def handle_report(message, user_id):
     sender = message.get("from") or {}
-    report_text = (message.get("text") or "").strip()
-    if not report_text:
+    report_text = (message.get("text") or message.get("caption") or "").strip()
+    has_media = any(k in message for k in
+                    ("photo", "video", "document", "audio", "voice",
+                     "sticker", "animation"))
+    if not report_text and not has_media:
         send_with_retry(user_id, REPORT_NEED_TEXT, parse_mode="Markdown")
         return
     first_name = sender.get("first_name") or "—"
@@ -773,23 +798,26 @@ def handle_report(message, user_id):
         STATE["learned"].get("support_user_id")
         or "@" + str(CFG.get("support_username") or "osine2")
     )
-    lines = [
+    header = "\n".join([
         "📥 گزارش جدید از کاربر AIFox",
         f"👤 نام: {first_name} {last_name}".rstrip(),
         f"🆔 نام کاربری: @{username}" if username else "🆔 نام کاربری: —",
         f"🔢 شناسه: {user_id}",
         "──────────────",
-        report_text,
-    ]
+    ])
     try:
+        # سربرگ تیکت: Reply پشتیبان روی همین پیام به کاربر می‌رسد
         result = api_call("sendMessage", {
             "chat_id": support_chat_id,
-            "text": "\n".join(lines),
+            "text": header + ("\n" + report_text if report_text else ""),
         })
     except (NetworkError, BotError) as exc:
         log("error", f"ارسال گزارش به پشتیبان ناموفق: {exc}")
         send_with_retry(user_id, REPORT_FAIL_TEXT)
         return
+    # نسخهٔ اصلی گزارش با حفظ قالب‌بندی/مدیا (اگر متن ساده نبوده)
+    if has_media or message.get("entities") or message.get("caption_entities"):
+        deliver_preserving_format(support_chat_id, message)
     support_message_id = (result or {}).get("message_id")
     if support_message_id is not None:
         STATE["tickets"][str(support_message_id)] = user_id
@@ -1111,8 +1139,8 @@ def handle_notify_text(message, user_id):
         show_main_menu(user_id)
         return
 
-    users = STATE.get("users") or {}
-    if not users:
+    targets, _ = notify_recipients()
+    if not targets:
         user_state["mode"] = "main"
         save_state()
         send_with_retry(user_id, NOTIFY_NO_USERS_TEXT)
@@ -1120,7 +1148,7 @@ def handle_notify_text(message, user_id):
 
     # پیام را نگه می‌داریم تا بعد از تایید، عیناً بازنشر شود
     PENDING_NOTIFY[user_id] = message
-    notify_ask_count(user_id, len(users))
+    notify_ask_count(user_id, len(targets))
 
 
 def handle_notify_count(message, user_id):
@@ -1136,7 +1164,7 @@ def handle_notify_count(message, user_id):
         show_main_menu(user_id)
         return
 
-    total = len(STATE.get("users") or {})
+    total = len(notify_recipients()[0])
     want = parse_count(text)
     if want is None:
         send_with_retry(user_id, NOTIFY_COUNT_BAD_TEXT,
@@ -1149,43 +1177,78 @@ def handle_notify_count(message, user_id):
     notify_ask_confirm(user_id, want, total)
 
 
-def run_notify_broadcast(owner_id, message, limit=None):
+def notify_recipients():
+    """فهرست گیرندگان: اعضای استارت‌زده منهای کاربران مسدود."""
+    users = list((STATE.get("users") or {}).keys())
+    blocked = STATE.get("blocked") or {}
+    targets, skipped = [], 0
+    for uid in users:
+        if str(uid) in blocked:
+            skipped += 1
+            continue
+        try:
+            targets.append(int(uid))
+        except (TypeError, ValueError):
+            continue
+    return targets, skipped
+
+
+def run_notify_broadcast(owner_id, message, limit=None, progress_message_id=None):
     """ارسال اطلاع‌رسانی تا رسیدن به «limit» ارسالِ موفق.
 
     خطاها شمرده می‌شوند ولی جای یک ارسال موفق را نمی‌گیرند: اگر ارسال به
     کسی شکست بخورد سراغ نفر بعدی می‌رویم تا دقیقاً به تعداد خواسته‌شده
-    ارسال موفق برسیم (تا جایی که عضو باقی باشد).
+    ارسال موفق برسیم (تا جایی که عضو باقی باشد). کاربران مسدود کنار
+    گذاشته می‌شوند و محدودیت نرخ سرور رعایت می‌شود.
     """
-    users = list((STATE.get("users") or {}).keys())
-    target = len(users) if limit is None else min(limit, len(users))
+    targets, skipped = notify_recipients()
+    target = len(targets) if limit is None else min(limit, len(targets))
     ok = fail = 0
     methods = {}
-    for uid in users:
+
+    def show_progress():
+        if progress_message_id is None:
+            return
+        percent = int(ok * 100 / target) if target else 100
+        try:
+            api_call("editMessageText", {
+                "chat_id": owner_id,
+                "message_id": progress_message_id,
+                "text": NOTIFY_PROGRESS_TEXT.format(
+                    ok=fa(ok), target=fa(target), percent=fa(percent)),
+            })
+        except (NetworkError, BotError):
+            pass
+
+    for chat_id in targets:
         if ok >= target:
             break
-        try:
-            chat_id = int(uid)
-        except (TypeError, ValueError):
-            continue
         method = deliver_preserving_format(chat_id, message)
         if method == "failed":
             fail += 1
         else:
             ok += 1
             methods[method] = methods.get(method, 0) + 1
+            if ok % NOTIFY_PROGRESS_EVERY == 0:
+                show_progress()
+        time.sleep(NOTIFY_SEND_DELAY)
+    show_progress()
 
     result = f"📢 اطلاع‌رسانی ارسال شد: {fa(ok)} نفر"
     if limit is not None:
         result += f" (هدف: {fa(target)})"
     if fail:
         result += f"\n↩️ {fa(fail)} ارسال ناموفق رد شد و جایگزین شد"
+    if skipped:
+        result += "\n" + NOTIFY_SKIPPED_BLOCKED_TEXT.format(n=fa(skipped))
     if methods:
         result += "\n🛠 روش ارسال: " + "، ".join(
             f"{k}: {fa(v)}" for k, v in methods.items())
     if ok < target:
         result += "\n" + NOTIFY_PARTIAL_TEXT.format(ok=fa(ok), want=fa(target))
     send_with_retry(owner_id, result)
-    log("info", f"اطلاع‌رسانی: {ok}/{target} موفق، {fail} خطا — admin {owner_id}")
+    log("info", f"اطلاع‌رسانی: {ok}/{target} موفق، {fail} خطا، "
+                f"{skipped} مسدود — admin {owner_id}")
 
 
 def handle_notify_callback(callback):
@@ -1240,7 +1303,7 @@ def handle_notify_callback(callback):
         return
 
     if data == NOTIFY_ALL_CALLBACK:
-        total = len(STATE.get("users") or {})
+        total = len(notify_recipients()[0])
         if user_id not in PENDING_NOTIFY or total == 0:
             answer(NOTIFY_EXPIRED_TEXT, alert=True)
             return
@@ -1259,7 +1322,7 @@ def handle_notify_callback(callback):
         return
     answer("در حال ارسال…")
     edit(NOTIFY_STARTED_TEXT)
-    run_notify_broadcast(user_id, pending, limit)
+    run_notify_broadcast(user_id, pending, limit, progress_message_id=message_id)
 
 
 def is_blocked(sender):
