@@ -16,8 +16,8 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
      ردیف ۳: سایت بازی روباه | کانال راهنما
      ردیف ۴: روباه پلاس (برنامک) | خرید تبلیغات
-  4. خرید ربات -> متن کامل (عنوان bold با HTML) + نقل‌قول سروشِ
-     پشتیبانی (MarkdownV2: > )
+  4. خرید ربات -> عکس خرید ربات روباه + متن سایت جدید + دکمهٔ شیشه‌ای
+     ورود مستقیم به سایت
   5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
      خریداران ربات (مالک یا ادمین) دستور «مهلت گروه» را داخل گروه
      می‌فرستند تا ربات مهلت باقی‌مانده را نشان دهد.
@@ -79,6 +79,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "pv_state.json"
 WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
+BUY_PHOTO = BASE_DIR / "assets" / "buy_site.jpg"
 GAME_PHOTO = BASE_DIR / "assets" / "game_site.jpg"
 ADS_PHOTO = BASE_DIR / "assets" / "ads_site.jpg"
 
@@ -100,27 +101,14 @@ MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌ها�
 MENU_KEYBOARD_VERSION = 3
 MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «خرید تبلیغات» اضافه شد)."
 
-PURCHASE_MAIN_HTML = (
-    "<b>🎉 پلن خرید اشتراک روباه</b>\n\n"
-    "مراحل :\n\n"
-    "🔸 وارد سایت میشوید قوانین میخوانید تایید میکنید و شماره تلفن یا یوزنیم "
-    "حساب اصلیتون رو وارد میکنید\n\n"
-    "🔸 اشتراک مورد نظر خودتون رو انتخاب میکنید\n\n"
-    "🔸 به شماره کارت داخل کادر پرداخت میکنید رسید پرداخت رو وارد و لینک "
-    "گروه تون رو می‌نویسید بعد دکمه ارسال درخواست\n\n"
-    "🔸 برای دیدن سفارشات ثبت شده و برسی می‌توانید گزینه برسی سفارشات رو "
-    "بزنید و ببینید آیا رد شده یا آیا در حال انتضار یا تایید شده\n\n"
-    "🔸 بعد از تایید به شماره تلفن ثبت شده یا ایدیتون پیام خواهیم داد\n\n"
-    "👇\n\n"
-    "https://fox-bot.aifox-chat.workers.dev\n"
-    "سایت خرید پلن ربات"
+PURCHASE_CAPTION = (
+    "سایت جدید خرید ربات روباه\n\n"
+    "🔘 برای ورود مستقیم روی دکمه زیر کلیک کنید\n\n"
+    "🔘 و برای نصب برنامه، سایت رو کپی و وارد مرورگر کنید؛ "
+    "بعد سه نقطه رو بزنید و گزینه نصب\n\n"
+    "https://foxbot.osine2.workers.dev/"
 )
-# نقل‌قول پشتیبانی: MarkdownV2 سروش کاراکتر '>' را رد می‌کند
-# (400: can't parse entities) — متن ساده فرستاده می‌شود
-PURCHASE_QUOTE_TEXT = (
-    "در صورت وجود هر مشکل یا پشتیبانی پیام بدهید\n"
-    "@osine2"
-)
+PURCHASE_BUTTON_TEXT = "🦊 ورود مستقیم به سایت خرید ربات روباه"
 
 EXTEND_TEXT = (
     "🔄 تمدید اشتراک ربات\n\n"
@@ -157,7 +145,7 @@ REPORT_NEED_TEXT = (
     "متنی را به پشتیبانی می‌فرستد)."
 )
 
-# HTML: فقط bold (مثل PURCHASE_MAIN_HTML)
+# HTML: فقط bold
 DEADLINE_SITE_TEXT = (
     "<b>🔸 اگر ربات روباه رو خریدد و مالک یا ادمین هستید داخل گروه دستور "
     "«مهلت گروه» را بفرستید ربات نمایش خواهد داد چقدر دیگر مهلت مانده</b>"
@@ -243,7 +231,7 @@ DEFAULT_CONFIG = {
     "group_url": "https://splus.ir/joingroup/AI_hfuzaN9GGKPWF0MsDJg",
     "group_title": "گروه روباه",
     "support_username": "osine2",
-    "site_url": "https://fox-bot.aifox-chat.workers.dev",
+    "site_url": "https://foxbot.osine2.workers.dev/",
     "game_site_url": "https://ai-fox.aifox-bot.workers.dev/",
     "deadline_site_url": "https://fox-robah.aifox-bot.workers.dev/",
     "guide_channel_url": "https://splus.ir/Plunfox",
@@ -661,6 +649,12 @@ def site_inline_keyboard():
     ]}
 
 
+def purchase_inline_keyboard():
+    return {"inline_keyboard": [
+        [{"text": PURCHASE_BUTTON_TEXT, "url": CFG["site_url"]}],
+    ]}
+
+
 # ---------------------------------------------------------------------------
 # صفحهٔ شروع
 # ---------------------------------------------------------------------------
@@ -844,6 +838,32 @@ def handle_report(message, user_id):
 # منوی اصلی
 # ---------------------------------------------------------------------------
 
+def send_purchase_site(user_id):
+    """«🦊 خرید ربات روباه» -> عکس خرید ربات + متن جدید + دکمهٔ شیشه‌ای سایت."""
+    keyboard = purchase_inline_keyboard()
+    if BUY_PHOTO.exists():
+        try:
+            data = BUY_PHOTO.read_bytes()
+            fields = [
+                ("chat_id", str(user_id)),
+                ("caption", PURCHASE_CAPTION),
+                ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+            ]
+            api_call_multipart(
+                "sendPhoto", fields,
+                [("photo", BUY_PHOTO.name, data, "image/jpeg")],
+            )
+            log("info", f"عکس + دکمهٔ خرید ربات روباه ارسال شد — user {user_id}")
+            return
+        except NetworkError as exc:
+            log("warn", f"sendPhoto خرید ربات ناموفق ({exc}) — ارسال متنی")
+        except BotError as exc:
+            log("error", f"sendPhoto خرید ربات خطا داد: {exc} — ارسال متنی")
+    # جایگزین بدون عکس (فایل موجود نیست یا آپلود شکست خورد)
+    send_with_retry(user_id, PURCHASE_CAPTION, reply_markup=keyboard)
+    log("info", f"پیام متنی خرید ربات روباه ارسال شد — user {user_id}")
+
+
 def send_game_site(user_id):
     """عکس روباه + دستهٔ بازی + دکمهٔ inline URL سایت بازی."""
     keyboard = {"inline_keyboard": [
@@ -1018,11 +1038,7 @@ def send_deadline_site(user_id):
 
 def handle_menu_text(user_id, text):
     if text == MENU_BUY:
-        # پیام اصلی (HTML: فقط bold — تگ‌های غیرمستند مثل blockquote باعث
-        # رد شدن کل پیام می‌شوند) + نقل‌قول پشتیبانی (MarkdownV2)
-        send_with_retry(user_id, PURCHASE_MAIN_HTML, parse_mode="HTML")
-        send_with_retry(user_id, PURCHASE_QUOTE_TEXT)
-        log("info", f"صفحهٔ خرید ارسال شد — user {user_id}")
+        send_purchase_site(user_id)
     elif text == MENU_REPORT:
         user_state = get_user_state(user_id)
         user_state["mode"] = "report"
