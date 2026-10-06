@@ -16,6 +16,7 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
      ردیف ۳: سایت بازی روباه | کانال راهنما
      ردیف ۴: روباه پلاس (برنامک) | خرید تبلیغات
+     ردیف ۵: ساخت فونت
   4. خرید ربات -> عکس خرید ربات روباه + متن سایت جدید + دکمهٔ شیشه‌ای
      ورود مستقیم به سایت
   5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
@@ -25,6 +26,11 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
   7. کانال راهنما -> دکمهٔ inline URL
   7.5 خرید تبلیغات -> عکس «روباه تبلیغ‌گر» + دکمهٔ شیشه‌ای «سایت خرید
       تبلیغات» (آدرس از ads_site_url در config.json)
+  7.6 ساخت فونت -> ربات نام انگلیسی کاربر را می‌گیرد (حداکثر ۳۰ کاراکتر،
+      فقط A-Z) و همان نام را با ۳۴ استایل یونیکد روی دکمه‌های شیشه‌ای
+      نشان می‌دهد؛ با کلیک روی هر دکمه، فقط همان متن فونت‌شده در چت
+      ارسال و دکمه‌ها جمع می‌شوند. وضعیت (نام + توکن فهرست) برای هر
+      کاربر جداگانه در data/ نگهداری می‌شود.
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
@@ -50,6 +56,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 import uuid
@@ -94,12 +101,18 @@ MENU_GAME = "🎮 سایت بازی روباه"
 MENU_GUIDE = "📚 کانال راهنما"
 MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
 MENU_ADS = "📣 خرید تبلیغات"
+MENU_FONT = "ساخت فونت"
+# همهٔ دکمه‌های منوی اصلی (برای تشخیص «کاربر دکمهٔ منو زد» در حالت‌های میانی)
+MENU_BUTTONS = (
+    MENU_BUY, MENU_REPORT, MENU_EXTEND, MENU_DEADLINE,
+    MENU_GAME, MENU_GUIDE, MENU_MINIAPP, MENU_ADS, MENU_FONT,
+)
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 # نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
 # یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
 # کلاینت کش می‌شود و فقط با ارسال دوبارهٔ reply_markup عوض می‌شود).
-MENU_KEYBOARD_VERSION = 3
-MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «خرید تبلیغات» اضافه شد)."
+MENU_KEYBOARD_VERSION = 4
+MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «ساخت فونت» اضافه شد)."
 
 PURCHASE_CAPTION = (
     "سایت جدید خرید ربات روباه\n\n"
@@ -213,6 +226,28 @@ BLOCK_USAGE_TEXT = (
     "مسدود @یوزرنیم         مثال: مسدود @someuser\n"
     "رفع مسدودی <اید یا @یوزرنیم>   (یا: آزاد ...)"
 )
+# --- ساخت فونت -------------------------------------------------------------
+FONT_ASK_TEXT = "✏️ اسم خودت رو به انگلیسی بنویس:"
+FONT_INVALID_TEXT = (
+    "⚠️ فقط حروف انگلیسی (A تا Z) قابل قبول است؛ فارسی، عدد یا نماد نفرست.\n\n"
+    + FONT_ASK_TEXT
+)
+FONT_MAX_LENGTH = 30
+FONT_TOO_LONG_TEXT = (
+    "⚠️ حداکثر ۳۰ کاراکتر انگلیسی مجاز است.\n\n" + FONT_ASK_TEXT
+)
+FONT_CHOOSE_TEXT = (
+    "🎨 اسم «{name}» آماده است.\n"
+    "روی هر فونتی که دوست داری بزن تا همان‌جا برایت ارسال شود 👇"
+)
+FONT_DONE_TEXT = "✅ فونت انتخاب شد."
+FONT_EXPIRED_TEXT = (
+    "⚠️ این فهرست فونت دیگر معتبر نیست؛ دوباره دکمهٔ «ساخت فونت» را بزنید."
+)
+FONT_CANCELLED_TEXT = "❌ ساخت فونت لغو شد."
+FONT_CALLBACK_PREFIX = "font:"
+FONT_BUTTONS_PER_ROW = 3
+
 GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 MINIAPP_BUTTON_TEXT = "🚀 ورود به روباه پلاس"
@@ -634,12 +669,13 @@ def start_inline_keyboard():
 
 
 def main_reply_keyboard():
-    """۲ دکمه در هر ردیف، ۴ ردیف (مطابق چیدمان خواسته‌شده)."""
+    """۲ دکمه در هر ردیف (چیدمان قبلی دست‌نخورده) + ردیف «ساخت فونت»."""
     return {"keyboard": [
         [MENU_BUY, MENU_REPORT],
         [MENU_EXTEND, MENU_DEADLINE],
         [MENU_GAME, MENU_GUIDE],
         [MENU_MINIAPP, MENU_ADS],
+        [MENU_FONT],
     ], "resize_keyboard": True}
 
 
@@ -940,6 +976,380 @@ def send_miniapp(user_id):
     log("info", f"دکمهٔ برنامک روباه پلاس ارسال شد — user {user_id}")
 
 
+# ---------------------------------------------------------------------------
+# ساخت فونت — موتور تبدیل حروف انگلیسی به استایل‌های یونیکد
+#
+# همهٔ نگاشت‌ها داخلی‌اند (بدون وابستگی بیرونی). هر استایل یا یک دیکشنری
+# «کاراکتر -> کاراکتر» است یا یک تابع؛ هر کاراکتری که نگاشت نداشته باشد
+# عیناً (fallback) در خروجی می‌ماند.
+# ---------------------------------------------------------------------------
+
+FONT_ASCII_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+FONT_ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz"
+FONT_ASCII_DIGITS = "0123456789"
+
+
+def font_block_map(upper_start=None, lower_start=None, digit_start=None,
+                   extra=None):
+    """نگاشت A-Z / a-z / 0-9 روی یک بلوک پیوستهٔ یونیکد (+ استثناها)."""
+    table = {}
+    if upper_start is not None:
+        for index, char in enumerate(FONT_ASCII_UPPER):
+            table[char] = chr(upper_start + index)
+    if lower_start is not None:
+        for index, char in enumerate(FONT_ASCII_LOWER):
+            table[char] = chr(lower_start + index)
+    if digit_start is not None:
+        for index, char in enumerate(FONT_ASCII_DIGITS):
+            table[char] = chr(digit_start + index)
+    if extra:
+        table.update(extra)
+    return table
+
+
+def font_letter_map(values, digits=None):
+    """یک گلیف مشترک برای حرف بزرگ و کوچک؛ None یعنی «نگاشت ندارد»."""
+    table = {}
+    for char, value in zip(FONT_ASCII_LOWER, values):
+        if value is None:
+            continue
+        table[char] = value
+        table[char.upper()] = value
+    if digits:
+        for char, value in zip(FONT_ASCII_DIGITS, digits):
+            table[char] = value
+    return table
+
+
+def font_alternating_case(text):
+    """یکی‌درمیان کوچک/بزرگ — مثل fOx."""
+    out, index = [], 0
+    for char in text:
+        if char.isalpha():
+            out.append(char.lower() if index % 2 == 0 else char.upper())
+            index += 1
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def font_dotted_below(text):
+    """نقطه‌دار زیر حرف — مثل F̣ọx̣ (ترکیب NFC تا حرف آماده ساخته شود)."""
+    return "".join(
+        unicodedata.normalize("NFC", char + "\u0323") if char.isalnum() else char
+        for char in text
+    )
+
+
+# پایهٔ استایل «تزئینی» + علامت‌های تزئینی عبری که روی گلیف می‌نشینند
+FONT_DECORATED_BASE = font_letter_map([
+    "ᥲ", "ᑲ", "ᥴ", "ᑯ", "ᥱ", "⨍", "ᧁ", "ᑋ", "ι", "ᒎ", "ᛕ", "ᥣ", "ᨆ",
+    "ᨶ", "ᨵ", "ᑭ", "ᑫ", "ᥬ", "ᦓ", "ᝨ", "ᥙ", "ꪜ", "ᥕ", "᥊", "ᥡ", "ᤁ",
+])
+FONT_DECORATION = "\u05C1\u05C5"
+
+
+def font_decorated(text):
+    """استایل تزئینی — مثل ܻ⨍ᨵׁׅׅ᥊ׁׅ"""
+    out = []
+    for char in text:
+        base = FONT_DECORATED_BASE.get(char)
+        if base is None:
+            out.append(char)
+        elif char in ("f", "F"):
+            out.append("\u073B" + base)
+        elif char in ("o", "O"):
+            out.append(base + "\u05C1\u05C5\u05C5")
+        else:
+            out.append(base + FONT_DECORATION)
+    return "".join(out)
+
+
+FONT_SMALL_CAPS = font_letter_map("ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ")
+
+# هر عضو: (شناسه، نگاشت یا None، تابع یا None)
+FONT_STYLES = [
+    ("smallcaps", FONT_SMALL_CAPS, None),                       # ғᴏx
+    ("doublestruck", font_block_map(0x1D538, 0x1D552, 0x1D7D8, extra={
+        "C": "\u2102", "H": "\u210D", "N": "\u2115", "P": "\u2119",
+        "Q": "\u211A", "R": "\u211D", "Z": "\u2124"}), None),    # 𝔽𝕠𝕩
+    ("monospace", font_block_map(0x1D670, 0x1D68A, 0x1D7F6), None),   # 𝙵𝚘𝚡
+    ("bold", font_block_map(0x1D400, 0x1D41A, 0x1D7CE), None),        # 𝐅𝐨𝐱
+    ("decorated", None, font_decorated),                              # ܻ⨍ᨵׁׅׅ᥊ׁׅ
+    ("greekmix", font_letter_map("αв¢∂єƒgнιנкℓмησρqяѕтυνωχуz"), None),  # ƒσχ
+    ("yi", font_letter_map(
+        "ꋬꃳꉔ꒯ꏂꊰꍌꃅꂑꀭꀘ꒒ꂵꋊꄲꉣꆰꋪꇙ꓄꒤ꏝꅏꉧꌦꑉ"), None),            # ꊰꄲꉧ
+    ("canadian", font_letter_map(
+        "ᗩᗷᑕᗪEᖴGᕼIᒍKᒪᗰᑎOᑭᑫᖇᔕTᑌᐯᗯ᙭Yᘔ"), None),                      # ᖴO᙭
+    ("smallcaps2", FONT_SMALL_CAPS, None),                      # ғᴏx (تکرار فهرست)
+    ("alternating", None, font_alternating_case),                     # fOx
+    ("fullwidth", font_block_map(0xFF21, 0xFF41, 0xFF10), None),      # Ｆｏｘ
+    ("sansbolditalic", font_block_map(0x1D63C, 0x1D656, 0x1D7EC), None),  # 𝙁𝙤𝙭
+    ("sansitalic", font_block_map(0x1D608, 0x1D622, 0x1D7E2), None),  # 𝘍𝘰𝘹
+    ("bolditalic", font_block_map(0x1D468, 0x1D482, 0x1D7CE), None),  # 𝑭𝒐𝒙
+    ("italic", font_block_map(0x1D434, 0x1D44E, extra={
+        "h": "\u210E"}), None),                                       # 𝐹𝑜𝑥
+    ("sansbold", font_block_map(0x1D5D4, 0x1D5EE, 0x1D7EC), None),    # 𝗙𝗼𝘅
+    ("sans", font_block_map(0x1D5A0, 0x1D5BA, 0x1D7E2), None),        # 𝖥𝗈𝗑
+    ("boldscript", font_block_map(0x1D4D0, 0x1D4EA), None),           # 𝓕𝓸𝔁
+    # حروفی که در بلوک script جا افتاده‌اند با معادل italic پر می‌شوند
+    ("script", font_block_map(0x1D49C, 0x1D4B6, extra={
+        "B": "\U0001D435", "E": "\U0001D438", "F": "\U0001D439",
+        "H": "\U0001D43B", "I": "\U0001D43C", "L": "\U0001D43F",
+        "M": "\U0001D440", "R": "\U0001D445", "e": "\U0001D452",
+        "g": "\U0001D454", "o": "\U0001D45C"}), None),                # 𝐹𝑜𝓍
+    ("boldfraktur", font_block_map(0x1D56C, 0x1D586), None),          # 𝕱𝖔𝖝
+    ("fraktur", font_block_map(0x1D504, 0x1D51E, extra={
+        "C": "\u212D", "H": "\u210C", "I": "\u2111", "R": "\u211C",
+        "Z": "\u2128"}), None),                                       # 𝔉𝔬𝔵
+    ("superscript", font_letter_map(
+        ["ᵃ", "ᵇ", "ᶜ", "ᵈ", "ᵉ", "ᶠ", "ᵍ", "ʰ", "ⁱ", "ʲ", "ᵏ", "ˡ", "ᵐ",
+         "ⁿ", "ᵒ", "ᵖ", None, "ʳ", "ˢ", "ᵗ", "ᵘ", "ᵛ", "ʷ", "ˣ", "ʸ", "ᶻ"],
+        digits="⁰¹²³⁴⁵⁶⁷⁸⁹"), None),                                  # ᶠᵒˣ
+    ("subscript", font_letter_map(
+        ["ₐ", "𝒷", "𝒸", "𝒹", "ₑ", "𝒻", "ℊ", "ₕ", "ᵢ", "ⱼ", "ₖ", "ₗ", "ₘ",
+         "ₙ", "ₒ", "ₚ", "𝓆", "ᵣ", "ₛ", "ₜ", "ᵤ", "ᵥ", "𝓌", "ₓ", "𝓎", "𝓏"],
+        digits="₀₁₂₃₄₅₆₇₈₉"), None),                                  # 𝒻ₒₓ
+    ("squared", font_letter_map(
+        [chr(0x1F130 + i) for i in range(26)]), None),                # 🄵🄾🅇
+    ("negativecircled", font_letter_map(
+        [chr(0x1F150 + i) for i in range(26)]), None),                # 🅕🅞🅧
+    ("negativesquared", font_letter_map(
+        [chr(0x1F170 + i) for i in range(26)]), None),                # 🅵🅾🆇
+    ("soft", font_letter_map(
+        ["ᥲ", "𝖻", "ᥴ", "𝖽", "ᥱ", "𝖿", "𝗀", "𝗁", "𝗂", "𝗃", "𝗄", "ᥣ", "𝗆",
+         "ᥒ", "᥆", "𝗉", "𝗊", "𝗋", "𝗌", "𝗍", "ᥙ", "𝗏", "ᥕ", "᥊", "ᥡ", "𝗓"]),
+     None),                                                           # 𝖿᥆᥊
+    ("armenian", font_letter_map(
+        ["ɑ", "ҍ", "ϲ", "ԃ", "ҽ", "բ", "ɠ", "հ", "ι", "ʝ", "ƙ", "ʅ", "ʍ",
+         "ղ", "օ", "ρ", "զ", "ɾ", "ʂ", "ƚ", "υ", "ѵ", "ɯ", None, "ყ", "ȥ"]),
+     None),                                                           # բօx
+    ("greek", font_letter_map(
+        ["α", "β", "ς", "δ", "ε", "ϝ", "γ", "η", "ι", "ϳ", "κ", "λ", "μ",
+         "ν", "σ", "ρ", "ϙ", "г", "ϛ", "τ", "υ", "ʋ", "ω", None, "ψ", "ζ"]),
+     None),                                                           # ϝσx
+    ("georgian", font_letter_map(
+        ["ა", "ბ", "ც", "დ", "ე", None, "გ", "ჰ", None, "ჯ", "კ", "ლ", "მ",
+         "ნ", "ი", "პ", "ქ", "რ", "ს", "ტ", "უ", "ვ", None, None, "ყ", "ზ"]),
+     None),                                                           # Fიx
+    ("cyrillic", font_letter_map(
+        ["А", "Б", "Ϲ", "Д", "Є", "Ғ", "Г", "Н", "І", "Ј", "К", "Л", "М",
+         "И", "ϴ", "Р", "Ԛ", "Я", "Ѕ", "Т", "Ц", "Ѵ", "Ш", "Х", "Ү", "З"]),
+     None),                                                           # ҒϴХ
+    ("runic", font_letter_map(
+        ["ᚨ", "ᛒ", "ᚲ", "ᛞ", "ᛖ", "ᚫ", "ᚵ", "ᚺ", "ᛁ", "ᛃ", "ᚴ", "ᛚ", "ᛗ",
+         "ᚾ", "ᛟ", "ᛈ", "ᛩ", "ᚱ", "ᛊ", "ᛏ", "ᚢ", "ᚡ", "ᚹ", "ᚷ", "ᛇ", "ᛉ"]),
+     None),                                                           # ᚫᛟᚷ
+    ("cjk", font_letter_map(
+        ["卂", "乃", "匚", "ᗪ", "乇", "千", "Ꮆ", "卄", "丨", "フ", "Ҝ", "ㄥ",
+         "爪", "几", "ㄖ", "卩", "Ɋ", "尺", "丂", "ㄒ", "ㄩ", "ᐯ", "山", "乂",
+         "丫", "乙"]), None),                                          # 千ㄖ乂
+    ("dotted", None, font_dotted_below),                              # F̣ọx̣
+]
+
+
+def apply_font_style(name, style):
+    """نام را با یک استایل تبدیل می‌کند؛ کاراکتر بدون نگاشت دست‌نخورده می‌ماند."""
+    _, table, func = style
+    if func is not None:
+        return func(name)
+    out = []
+    for char in name:
+        mapped = table.get(char)
+        if mapped is None and char.isalpha():
+            mapped = table.get(char.lower())
+            if mapped is None:
+                mapped = table.get(char.upper())
+        out.append(char if mapped is None else mapped)
+    return "".join(out)
+
+
+def font_variants(name):
+    """همهٔ نسخه‌های فونت‌شدهٔ نام، به ترتیب FONT_STYLES."""
+    return [apply_font_style(name, style) for style in FONT_STYLES]
+
+
+# ---------------------------------------------------------------------------
+# ساخت فونت — اعتبارسنجی ورودی، کیبورد شیشه‌ای و هندلرها
+# ---------------------------------------------------------------------------
+
+FONT_NAME_PATTERN = re.compile(r"[A-Za-z]+(?: [A-Za-z]+)*")
+
+
+def normalize_font_name(raw):
+    """فاصله‌های اضافی را جمع می‌کند (ورودی کاربر معمولاً تمیز نیست)."""
+    return re.sub(r"\s+", " ", str(raw or "")).strip()
+
+
+def font_name_error(name):
+    """اگر نام معتبر نباشد، متن خطای مناسب برمی‌گرداند؛ وگرنه None."""
+    if not name:
+        return FONT_INVALID_TEXT
+    if not FONT_NAME_PATTERN.fullmatch(name):
+        return FONT_INVALID_TEXT
+    if len(name) > FONT_MAX_LENGTH:
+        return FONT_TOO_LONG_TEXT
+    return None
+
+
+def font_inline_keyboard(name, token):
+    """دکمه‌های شیشه‌ای: متن هر دکمه = همان نام با یک استایل."""
+    rows, row = [], []
+    for index, style in enumerate(FONT_STYLES):
+        row.append({
+            "text": apply_font_style(name, style),
+            "callback_data": f"{FONT_CALLBACK_PREFIX}{token}:{index}",
+        })
+        if len(row) == FONT_BUTTONS_PER_ROW:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return {"inline_keyboard": rows}
+
+
+def start_font_flow(user_id):
+    """«ساخت فونت» -> درخواست نام انگلیسی (state همین کاربر روی font)."""
+    user_state = get_user_state(user_id)
+    user_state["mode"] = "font"
+    user_state.pop("font_name", None)
+    user_state.pop("font_token", None)
+    save_state()
+    send_with_retry(user_id, FONT_ASK_TEXT)
+    log("info", f"شروع ساخت فونت — user {user_id} (در انتظار نام انگلیسی)")
+
+
+def send_font_options(user_id, name):
+    """نام معتبر -> نمایش همهٔ استایل‌ها روی دکمه‌های شیشه‌ای."""
+    token = uuid.uuid4().hex[:8]
+    user_state = get_user_state(user_id)
+    user_state["font_name"] = name
+    user_state["font_token"] = token
+    user_state["mode"] = "main"
+    save_state()
+    send_with_retry(
+        user_id,
+        FONT_CHOOSE_TEXT.format(name=name),
+        reply_markup=font_inline_keyboard(name, token),
+    )
+    log("info", f"{len(FONT_STYLES)} فونت برای «{name}» ارسال شد — user {user_id}")
+
+
+def handle_font_name_message(message, user_id):
+    """پیام کاربر در حالت «font».
+
+    True  = پیام مصرف شد (نام گرفته شد یا خطا نشان داده شد)
+    False = پیام مربوط به منو/دستور است و باید مثل قبل پردازش شود
+    """
+    user_state = get_user_state(user_id)
+    text = (message.get("text") or "").strip()
+
+    if text in CANCEL_TEXTS:
+        user_state["mode"] = "main"
+        save_state()
+        send_with_retry(user_id, FONT_CANCELLED_TEXT)
+        show_main_menu(user_id)
+        return True
+    if text == MENU_FONT:            # دوباره زدن همان دکمه
+        start_font_flow(user_id)
+        return True
+    if text.startswith("/") or text in MENU_BUTTONS:
+        # کاربر وسط کار دکمهٔ دیگری زد: از حالت فونت خارج شو و عادی ادامه بده
+        user_state["mode"] = "main"
+        save_state()
+        return False
+
+    name = normalize_font_name(text)
+    error = font_name_error(name)
+    if error is not None:
+        send_with_retry(user_id, error)
+        log("info", f"نام نامعتبر برای فونت — user {user_id} ({text[:20]!r})")
+        return True
+
+    send_font_options(user_id, name)
+    return True
+
+
+def font_remove_keyboard(chat_id, message_id):
+    """دکمه‌های فونت را جمع می‌کند تا انتخاب دوباره/اشتباه ممکن نباشد."""
+    if message_id is None:
+        return False
+    try:
+        api_call("editMessageReplyMarkup", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": {"inline_keyboard": []},
+        })
+        return True
+    except (NetworkError, BotError) as exc:
+        log("warn", f"جمع‌کردن دکمه‌های فونت با editMessageReplyMarkup نشد: {exc}")
+    try:
+        api_call("editMessageText", {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": FONT_DONE_TEXT,
+        })
+        return True
+    except (NetworkError, BotError) as exc:
+        log("warn", f"جمع‌کردن دکمه‌های فونت ناموفق بود: {exc}")
+    return False
+
+
+def handle_font_callback(callback):
+    """کلیک روی یکی از دکمه‌های فونت -> ارسال همان نام با همان استایل."""
+    cb_id = callback.get("id")
+    data = str(callback.get("data") or "")
+    sender = callback.get("from") or {}
+    user_id = sender.get("id")
+    if user_id is None:
+        return
+    cb_message = callback.get("message") or {}
+    chat_id = (cb_message.get("chat") or {}).get("id") or user_id
+    message_id = cb_message.get("message_id")
+
+    def answer(text="", alert=False):
+        params = {"callback_query_id": cb_id}
+        if text:
+            params["text"] = text
+        if alert:
+            params["show_alert"] = True
+        try:
+            api_call("answerCallbackQuery", params)
+        except (NetworkError, BotError) as exc:
+            log("warn", f"answerCallbackQuery فونت نشد: {exc}")
+
+    if not is_owner(user_id) and is_blocked(sender):
+        answer(BLOCK_TEXT, alert=True)
+        return
+
+    parts = data.split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        answer(FONT_EXPIRED_TEXT, alert=True)
+        return
+    token, index = parts[1], int(parts[2])
+
+    user_state = get_user_state(user_id)
+    name = user_state.get("font_name")
+    # توکن = فهرست فونتِ همین کاربر؛ فهرست‌های قدیمی/کاربر دیگر پذیرفته نمی‌شوند
+    if not name or user_state.get("font_token") != token:
+        answer(FONT_EXPIRED_TEXT, alert=True)
+        font_remove_keyboard(chat_id, message_id)
+        return
+    if not 0 <= index < len(FONT_STYLES):
+        answer(FONT_EXPIRED_TEXT, alert=True)
+        return
+
+    styled = apply_font_style(name, FONT_STYLES[index])
+    answer()
+    # فقط متن فونت‌شده؛ بدون هیچ توضیح اضافه
+    send_with_retry(chat_id, styled)
+    user_state["font_token"] = None
+    user_state["mode"] = "main"
+    save_state()
+    font_remove_keyboard(chat_id, message_id)
+    log("info", f"فونت «{FONT_STYLES[index][0]}» برای user {user_id} ارسال شد")
+
+
 BOT_COMMANDS = [
     {"command": "start", "description": "🦊 شروع / نمایش منوی اصلی"},
     {"command": "app", "description": "🚀 ورود به روباه پلاس (برنامک)"},
@@ -947,6 +1357,7 @@ BOT_COMMANDS = [
     {"command": "buy", "description": "💎 خرید / تمدید اشتراک ربات"},
     {"command": "game", "description": "🎮 سایت بازی روباه"},
     {"command": "ads", "description": "📣 خرید تبلیغات"},
+    {"command": "font", "description": "🔤 ساخت فونت"},
     {"command": "guide", "description": "📚 کانال راهنما"},
     {"command": "support", "description": "🎧 ارسال گزارش به پشتیبانی"},
 ]
@@ -980,6 +1391,8 @@ def handle_slash_command(user_id, text):
         send_game_site(user_id)
     elif cmd == "/ads":
         send_ads_site(user_id)
+    elif cmd == "/font":
+        start_font_flow(user_id)
     elif cmd == "/guide":
         send_guide_channel(user_id)
     elif cmd == "/support":
@@ -1058,6 +1471,8 @@ def handle_menu_text(user_id, text):
         send_miniapp(user_id)
     elif text == MENU_ADS:
         send_ads_site(user_id)
+    elif text == MENU_FONT:
+        start_font_flow(user_id)
     else:
         # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
         show_main_menu(user_id)
@@ -1485,6 +1900,11 @@ def handle_update(update):
                 handle_notify_callback(callback)
             except (NetworkError, BotError) as exc:
                 log("error", f"خطا در callback اطلاع‌رسانی: {exc}")
+        elif callback and str(data or "").startswith(FONT_CALLBACK_PREFIX):
+            try:
+                handle_font_callback(callback)
+            except (NetworkError, BotError) as exc:
+                log("error", f"خطا در callback فونت: {exc}")
         return
 
     chat = message.get("chat") or {}
@@ -1606,6 +2026,15 @@ def handle_update(update):
         except (NetworkError, BotError) as exc:
             log("error", f"خطا در بررسی عضویت: {exc}")
         return
+
+    # در انتظار نام انگلیسی برای ساخت فونت (اگر دکمهٔ منو زد، عادی ادامه می‌دهیم)
+    if user_state.get("mode") == "font":
+        try:
+            if handle_font_name_message(message, user_id):
+                return
+        except (NetworkError, BotError) as exc:
+            log("error", f"خطا در ساخت فونت: {exc}")
+            return
 
     try:
         # کاربران قدیمی: کیبورد کش‌شده‌شان دکمهٔ جدید را ندارد → ارسال منوی تازه
