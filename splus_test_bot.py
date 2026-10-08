@@ -16,7 +16,7 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
      ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
      ردیف ۳: سایت بازی روباه | کانال راهنما
      ردیف ۴: روباه پلاس (برنامک) | خرید تبلیغات
-     ردیف ۵: ساخت فونت
+     ردیف ۵: ساخت فونت | ربات برنامه نویس
   4. خرید ربات -> عکس خرید ربات روباه + متن سایت جدید + دکمهٔ شیشه‌ای
      ورود مستقیم به سایت
   5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
@@ -31,6 +31,8 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
       نشان می‌دهد؛ با کلیک روی هر دکمه، فقط همان متن فونت‌شده در چت
       ارسال و دکمه‌ها جمع می‌شوند. وضعیت (نام + توکن فهرست) برای هر
       کاربر جداگانه در data/ نگهداری می‌شود.
+  7.7 ربات برنامه نویس -> عکس برنامه‌نویسی + متن بولد (HTML) + دکمهٔ
+      شیشه‌ای «🤖 ورود به ربات @acodai» (آدرس از devbot_url در config.json)
   8. ارسال گزارش کاربر به پشتیبان (@osine2) همراه با نام/username/
      شناسهٔ کاربر + نگاشت پایدار تیکت برای برگشت دقیق Reply
      پشتیبان به همان کاربر.
@@ -89,6 +91,7 @@ WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
 BUY_PHOTO = BASE_DIR / "assets" / "buy_site.jpg"
 GAME_PHOTO = BASE_DIR / "assets" / "game_site.jpg"
 ADS_PHOTO = BASE_DIR / "assets" / "ads_site.jpg"
+DEVBOT_PHOTO = BASE_DIR / "assets" / "programmer_bot.jpg"
 
 START_CAPTION = "برای فعال سازی ربات باید عضو گروه و کانال روباه باشید"
 
@@ -102,17 +105,19 @@ MENU_GUIDE = "📚 کانال راهنما"
 MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
 MENU_ADS = "📣 خرید تبلیغات"
 MENU_FONT = "ساخت فونت"
+MENU_DEVBOT = "🤖 ربات برنامه نویس"
 # همهٔ دکمه‌های منوی اصلی (برای تشخیص «کاربر دکمهٔ منو زد» در حالت‌های میانی)
 MENU_BUTTONS = (
     MENU_BUY, MENU_REPORT, MENU_EXTEND, MENU_DEADLINE,
     MENU_GAME, MENU_GUIDE, MENU_MINIAPP, MENU_ADS, MENU_FONT,
+    MENU_DEVBOT,
 )
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 # نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
 # یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
 # کلاینت کش می‌شود و فقط با ارسال دوبارهٔ reply_markup عوض می‌شود).
-MENU_KEYBOARD_VERSION = 4
-MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «ساخت فونت» اضافه شد)."
+MENU_KEYBOARD_VERSION = 5
+MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «🤖 ربات برنامه نویس» اضافه شد)."
 
 PURCHASE_CAPTION = (
     "سایت جدید خرید ربات روباه\n\n"
@@ -258,6 +263,29 @@ ADS_CAPTION = (
     "برای ثبت سفارش و مشاهدهٔ تعرفه‌ها، دکمهٔ زیر را بزنید 👇"
 )
 
+# --- ربات برنامه نویس (@acodai) -------------------------------------------
+# کپشن عکس: متن‌های فارسی با <b> بولد شده‌اند (parse_mode=HTML). نسخهٔ ساده
+# (بدون تگ HTML) برای زمانی که سرور parse_mode را برای کپشن عکس نپذیرد.
+DEVBOT_CAPTION_TEMPLATE = (
+    "<b>ربات</b>\n\n"
+    "acod.ai » @acodai\n\n"
+    "<b>یک ربات راهنمای برنامه نویس دارای هوش مصنوعی برای سوالات در مورد "
+    "برنامه نویسی با بهترین راهنمایی ها</b>\n\n"
+    "<b>«🗳 » ربات اشتراکی می‌باشد و فقط برای افراد برنامه نویس مناسبه "
+    "برای تست وارد گروه زیر شوید</b>\n\n"
+    '<a href="{group_url}">{group_url}</a>'
+)
+DEVBOT_CAPTION_PLAIN_TEMPLATE = (
+    "ربات\n\n"
+    "acod.ai » @acodai\n\n"
+    "یک ربات راهنمای برنامه نویس دارای هوش مصنوعی برای سوالات در مورد "
+    "برنامه نویسی با بهترین راهنمایی ها\n\n"
+    "«🗳 » ربات اشتراکی می‌باشد و فقط برای افراد برنامه نویس مناسبه "
+    "برای تست وارد گروه زیر شوید\n\n"
+    "{group_url}"
+)
+DEVBOT_BUTTON_TEXT = "🤖 ورود به ربات @acodai"
+
 # مقادیر پیش‌فرض (config.json می‌تواند روی آن‌ها برسد)
 DEFAULT_CONFIG = {
     "channel_url": "https://splus.ir/ai_fox",
@@ -272,6 +300,7 @@ DEFAULT_CONFIG = {
     "guide_channel_url": "https://splus.ir/Plunfox",
     "ads_site_url": "https://soroush-ads.osine2.workers.dev/",
     "miniapp_url": "https://ai-fox.aifox-bot.workers.dev/",
+    "devbot_url": "https://splus.ir/acodai",
     "owner_user_id": 37858988,
 }
 
@@ -669,13 +698,13 @@ def start_inline_keyboard():
 
 
 def main_reply_keyboard():
-    """۲ دکمه در هر ردیف (چیدمان قبلی دست‌نخورده) + ردیف «ساخت فونت»."""
+    """۲ دکمه در هر ردیف (چیدمان قبلی دست‌نخورده) + ردیف آخر: فونت و ربات برنامه‌نویسی."""
     return {"keyboard": [
         [MENU_BUY, MENU_REPORT],
         [MENU_EXTEND, MENU_DEADLINE],
         [MENU_GAME, MENU_GUIDE],
         [MENU_MINIAPP, MENU_ADS],
-        [MENU_FONT],
+        [MENU_FONT, MENU_DEVBOT],
     ], "resize_keyboard": True}
 
 
@@ -974,6 +1003,73 @@ def send_miniapp(user_id):
                     "همهٔ بازی‌ها، کیف پول و امکانات در یک‌جا!\n",
                     reply_markup=keyboard)
     log("info", f"دکمهٔ برنامک روباه پلاس ارسال شد — user {user_id}")
+
+
+# ---------------------------------------------------------------------------
+# ربات برنامه نویس (@acodai)
+# ---------------------------------------------------------------------------
+
+def devbot_caption():
+    """کپشن HTML — متن‌های فارسی با <b> بولد؛ لینک گروه از config.json."""
+    return DEVBOT_CAPTION_TEMPLATE.format(group_url=CFG["group_url"])
+
+
+def devbot_caption_plain():
+    """کپشن ساده (بدون HTML) — fallback اگر سرور parse_mode را نپذیرد."""
+    return DEVBOT_CAPTION_PLAIN_TEMPLATE.format(group_url=CFG["group_url"])
+
+
+def devbot_inline_keyboard():
+    return {"inline_keyboard": [
+        [{"text": DEVBOT_BUTTON_TEXT, "url": CFG["devbot_url"]}],
+    ]}
+
+
+def send_devbot_info(user_id):
+    """«🤖 ربات برنامه نویس» -> عکس برنامه‌نویسی + متن بولد + دکمهٔ شیشه‌ای.
+
+    ترتیب تلاش: ۱) عکس با کپشن HTML (بولد)  ۲) عکس با کپشن ساده  ۳) پیام متنی
+    """
+    keyboard = devbot_inline_keyboard()
+    if DEVBOT_PHOTO.exists():
+        try:
+            data = DEVBOT_PHOTO.read_bytes()
+            fields = [
+                ("chat_id", str(user_id)),
+                ("caption", devbot_caption()),
+                ("parse_mode", "HTML"),
+                ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+            ]
+            api_call_multipart(
+                "sendPhoto", fields,
+                [("photo", DEVBOT_PHOTO.name, data, "image/jpeg")],
+            )
+            log("info", f"عکس + دکمهٔ ربات برنامه نویس ارسال شد — user {user_id}")
+            return
+        except BotError as exc:
+            # احتمالاً parse_mode برای کپشن عکس پشتیبانی نشده — با کپشن ساده
+            log("warn", f"sendPhoto با کپشن HTML رد شد ({exc}) — تلاش با کپشن ساده")
+            try:
+                data = DEVBOT_PHOTO.read_bytes()
+                fields = [
+                    ("chat_id", str(user_id)),
+                    ("caption", devbot_caption_plain()),
+                    ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+                ]
+                api_call_multipart(
+                    "sendPhoto", fields,
+                    [("photo", DEVBOT_PHOTO.name, data, "image/jpeg")],
+                )
+                log("info", f"عکس (کپشن ساده) ربات برنامه نویس ارسال شد — user {user_id}")
+                return
+            except (NetworkError, BotError) as exc2:
+                log("error", f"sendPhoto ربات برنامه نویس خطا داد: {exc2} — ارسال متنی")
+        except NetworkError as exc:
+            log("warn", f"sendPhoto ربات برنامه نویس ناموفق ({exc}) — ارسال متنی")
+    # جایگزین بدون عکس (فایل موجود نیست یا آپلود شکست خورد)
+    send_with_retry(user_id, devbot_caption(), parse_mode="HTML",
+                    reply_markup=keyboard)
+    log("info", f"پیام متنی ربات برنامه نویس ارسال شد — user {user_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -1473,6 +1569,8 @@ def handle_menu_text(user_id, text):
         send_ads_site(user_id)
     elif text == MENU_FONT:
         start_font_flow(user_id)
+    elif text == MENU_DEVBOT:
+        send_devbot_info(user_id)
     else:
         # متن ناشناخته: منوی اصلی دوباره نمایش داده می‌شود
         show_main_menu(user_id)

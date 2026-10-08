@@ -259,10 +259,10 @@ class KeyboardTests(BotTestCase):
         self.assertIn(bot.MENU_FONT, flat)
 
     def test_previous_keyboard_rows_unchanged(self):
-        """چیدمان قبلی دست‌نخورده است و فقط یک ردیف اضافه شده."""
+        """ردیف‌های قبلی دست‌نخورده‌اند؛ «ربات برنامه نویس» به ردیف فونت اضافه شد."""
         rows = bot.main_reply_keyboard()["keyboard"]
         self.assertEqual(rows[:4], self.PREVIOUS_ROWS)
-        self.assertEqual(rows[4], [bot.MENU_FONT])
+        self.assertEqual(rows[4], [bot.MENU_FONT, bot.MENU_DEVBOT])
         self.assertEqual(len(rows), 5)
 
     def test_resize_keyboard_flag_preserved(self):
