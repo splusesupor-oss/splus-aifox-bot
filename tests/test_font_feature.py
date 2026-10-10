@@ -246,7 +246,7 @@ class KeyboardTests(BotTestCase):
     PREVIOUS_ROWS = [
         [bot.MENU_BUY, bot.MENU_REPORT],
         [bot.MENU_EXTEND, bot.MENU_DEADLINE],
-        [bot.MENU_GAME, bot.MENU_GUIDE],
+        [bot.MENU_AIBOT, bot.MENU_GUIDE],
         [bot.MENU_MINIAPP, bot.MENU_ADS],
     ]
 
@@ -298,7 +298,7 @@ class KeyboardTests(BotTestCase):
     def test_font_command_added_to_blue_menu(self):
         commands = [item["command"] for item in bot.BOT_COMMANDS]
         self.assertIn("font", commands)
-        for previous in ("start", "app", "menu", "buy", "game", "ads",
+        for previous in ("start", "app", "menu", "buy", "ai", "ads",
                          "guide", "support"):
             self.assertIn(previous, commands)
 
@@ -568,7 +568,7 @@ class PerUserStateTests(BotTestCase):
         self.assertEqual(bot.get_user_state(USER_B)["mode"], "main")
 
         self.api.reset()
-        self.send_text(USER_B, bot.MENU_GAME)   # کاربر دوم کار عادی خودش را می‌کند
+        self.send_text(USER_B, bot.MENU_AIBOT)   # کاربر دوم کار عادی خودش را می‌کند
         self.assertEqual(bot.get_user_state(USER_A)["mode"], "font")
         self.assertIsNone(bot.get_user_state(USER_B).get("font_name"))
 

@@ -14,7 +14,7 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
   3. منوی اصلی (Reply Keyboard در پایین چت، ۲ دکمه در هر ردیف):
      ردیف ۱: خرید ربات | ارسال گزارش به پشتیبانی
      ردیف ۲: تمدید اشتراک | مهلت باقی‌ماندهٔ گروه
-     ردیف ۳: سایت بازی روباه | کانال راهنما
+     ردیف ۳: خرید ربات هوش مصنوعی | کانال راهنما
      ردیف ۴: روباه پلاس (برنامک) | خرید تبلیغات
      ردیف ۵: ساخت فونت | ربات برنامه نویس
   4. خرید ربات -> عکس خرید ربات روباه + متن سایت جدید + دکمهٔ شیشه‌ای
@@ -22,7 +22,9 @@ AIFox — ربات سروش‌پلاس (Bot API رسمی) — @Aifox_bot
   5. مهلت باقی‌ماندهٔ گروه -> پیام راهنمای Bold (HTML، بدون دکمه):
      خریداران ربات (مالک یا ادمین) دستور «مهلت گروه» را داخل گروه
      می‌فرستند تا ربات مهلت باقی‌مانده را نشان دهد.
-  6. سایت بازی روباه -> عکس + دکمهٔ inline URL
+  6. خرید ربات هوش مصنوعی -> عکس روباه AI + متن کامل بولد (HTML) +
+     ۳ دکمهٔ شیشه‌ای «کانال راهنما» / «سایت خرید» / «گروه تست»
+     (آدرس‌ها از aibot_guide_url و aibot_buy_url در config.json)
   7. کانال راهنما -> دکمهٔ inline URL
   7.5 خرید تبلیغات -> عکس «روباه تبلیغ‌گر» + دکمهٔ شیشه‌ای «سایت خرید
       تبلیغات» (آدرس از ads_site_url در config.json)
@@ -89,7 +91,7 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "pv_state.json"
 WELCOME_PHOTO = BASE_DIR / "assets" / "start_photo.jpg"
 BUY_PHOTO = BASE_DIR / "assets" / "buy_site.jpg"
-GAME_PHOTO = BASE_DIR / "assets" / "game_site.jpg"
+AIBOT_PHOTO = BASE_DIR / "assets" / "ai_bot.jpg"
 ADS_PHOTO = BASE_DIR / "assets" / "ads_site.jpg"
 DEVBOT_PHOTO = BASE_DIR / "assets" / "programmer_bot.jpg"
 
@@ -100,7 +102,7 @@ MENU_BUY = "🦊 خرید ربات روباه"
 MENU_REPORT = "🎧 ارسال گزارش به پشتیبانی"
 MENU_EXTEND = "🔄 تمدید اشتراک ربات"
 MENU_DEADLINE = "⏳ مهلت باقی‌مانده گروه"
-MENU_GAME = "🎮 سایت بازی روباه"
+MENU_AIBOT = "🧠 خرید ربات هوش مصنوعی"
 MENU_GUIDE = "📚 کانال راهنما"
 MENU_MINIAPP = "🚀 روباه پلاس (برنامک)"
 MENU_ADS = "📣 خرید تبلیغات"
@@ -109,15 +111,15 @@ MENU_DEVBOT = "🤖 ربات برنامه نویس"
 # همهٔ دکمه‌های منوی اصلی (برای تشخیص «کاربر دکمهٔ منو زد» در حالت‌های میانی)
 MENU_BUTTONS = (
     MENU_BUY, MENU_REPORT, MENU_EXTEND, MENU_DEADLINE,
-    MENU_GAME, MENU_GUIDE, MENU_MINIAPP, MENU_ADS, MENU_FONT,
+    MENU_AIBOT, MENU_GUIDE, MENU_MINIAPP, MENU_ADS, MENU_FONT,
     MENU_DEVBOT,
 )
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 # نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
 # یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
 # کلاینت کش می‌شود و فقط با ارسال دوبارهٔ reply_markup عوض می‌شود).
-MENU_KEYBOARD_VERSION = 5
-MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «🤖 ربات برنامه نویس» اضافه شد)."
+MENU_KEYBOARD_VERSION = 6
+MENU_UPDATED_NOTE = "🔄 منوی ربات به‌روزرسانی شد (دکمهٔ «سایت بازی» به «خرید ربات هوش مصنوعی» تغییر کرد)."
 
 PURCHASE_CAPTION = (
     "سایت جدید خرید ربات روباه\n\n"
@@ -253,7 +255,38 @@ FONT_CANCELLED_TEXT = "❌ ساخت فونت لغو شد."
 FONT_CALLBACK_PREFIX = "font:"
 FONT_BUTTONS_PER_ROW = 3
 
-GAME_BUTTON_TEXT = "🎮 ورود به سایت بازی روباه"
+# --- خرید ربات هوش مصنوعی (ai code fox) ------------------------------------
+# Caption: every line is fully bold (parse_mode=HTML). Plain version is the
+# fallback when the server rejects parse_mode on the photo caption.
+AIBOT_CAPTION = (
+    "<b>🔹 توضیحات</b>\n\n"
+    "<b>ai code fox</b>\n\n"
+    "<b>یک چت بات هوش مصنوعی هست ربات هوش مصنوعی میتواند از یک ربات ساخته شده قابلیت مدیریت و منابع پیشرفته تری برای گروه شما داشته باشد این ربات یک هوش مصنوعی متنی می‌باشد</b>\n\n"
+    "<b>فقط به ۱۳ گروه داده میشه و تا تمام شدن مهلت زمانی هر گروه نمی‌توانیم گروه دیگه رو بپذیریم</b>\n\n"
+    "<b>این هوش مصنوعی حتی می‌تونه گروه تحلیل و تمام اعضای که در حال پیام دادن هستن رو ببینه و بدونه و حتی ازش در مورد گروه یا کاربران سوال بپرسید جواب بده</b>\n\n"
+    "<b>🗳 مدل ها</b>\n\n"
+    "<b>مدل ۱ — دستیار سریع و عمومی</b>\n\n"
+    "<b>مدل ۲ — دستیار استدلالی متعادل</b>\n\n"
+    "<b>مدل ۳ — دستیار پیشرفته استدلال و کدنویسی</b>\n\n"
+    "<b>🔕 قیمت ها بر اساس تعرفه هوش مصنوعی چت جی پی تی و حتی زیر قیمت انجام میشه تعرفه کمتر سهمیه گرون تر برای ما میشه</b>"
+)
+
+AIBOT_CAPTION_PLAIN = (
+    "🔹 توضیحات\n\n"
+    "ai code fox\n\n"
+    "یک چت بات هوش مصنوعی هست ربات هوش مصنوعی میتواند از یک ربات ساخته شده قابلیت مدیریت و منابع پیشرفته تری برای گروه شما داشته باشد این ربات یک هوش مصنوعی متنی می‌باشد\n\n"
+    "فقط به ۱۳ گروه داده میشه و تا تمام شدن مهلت زمانی هر گروه نمی‌توانیم گروه دیگه رو بپذیریم\n\n"
+    "این هوش مصنوعی حتی می‌تونه گروه تحلیل و تمام اعضای که در حال پیام دادن هستن رو ببینه و بدونه و حتی ازش در مورد گروه یا کاربران سوال بپرسید جواب بده\n\n"
+    "🗳 مدل ها\n\n"
+    "مدل ۱ — دستیار سریع و عمومی\n\n"
+    "مدل ۲ — دستیار استدلالی متعادل\n\n"
+    "مدل ۳ — دستیار پیشرفته استدلال و کدنویسی\n\n"
+    "🔕 قیمت ها بر اساس تعرفه هوش مصنوعی چت جی پی تی و حتی زیر قیمت انجام میشه تعرفه کمتر سهمیه گرون تر برای ما میشه"
+)
+
+AIBOT_GUIDE_BUTTON_TEXT = "📚 کانال راهنما"
+AIBOT_BUY_BUTTON_TEXT = "🛒 سایت خرید"
+AIBOT_GROUP_BUTTON_TEXT = "👥 گروه تست"
 GUIDE_BUTTON_TEXT = "📚 ورود به کانال راهنما"
 MINIAPP_BUTTON_TEXT = "🚀 ورود به روباه پلاس"
 ADS_BUTTON_TEXT = "📣 سایت خرید تبلیغات"
@@ -301,6 +334,8 @@ DEFAULT_CONFIG = {
     "ads_site_url": "https://soroush-ads.osine2.workers.dev/",
     "miniapp_url": "https://ai-fox.aifox-bot.workers.dev/",
     "devbot_url": "https://splus.ir/acodai",
+    "aibot_guide_url": "https://splus.ir/Aiacod",
+    "aibot_buy_url": "https://acod.osine2.workers.dev",
     "owner_user_id": 37858988,
 }
 
@@ -702,7 +737,7 @@ def main_reply_keyboard():
     return {"keyboard": [
         [MENU_BUY, MENU_REPORT],
         [MENU_EXTEND, MENU_DEADLINE],
-        [MENU_GAME, MENU_GUIDE],
+        [MENU_AIBOT, MENU_GUIDE],
         [MENU_MINIAPP, MENU_ADS],
         [MENU_FONT, MENU_DEVBOT],
     ], "resize_keyboard": True}
@@ -929,29 +964,78 @@ def send_purchase_site(user_id):
     log("info", f"پیام متنی خرید ربات روباه ارسال شد — user {user_id}")
 
 
-def send_game_site(user_id):
-    """عکس روباه + دستهٔ بازی + دکمهٔ inline URL سایت بازی."""
-    keyboard = {"inline_keyboard": [
-        [{"text": GAME_BUTTON_TEXT, "url": CFG["game_site_url"]}],
+# ---------------------------------------------------------------------------
+# خرید ربات هوش مصنوعی (ai code fox)
+# ---------------------------------------------------------------------------
+
+def aibot_caption():
+    """کپشن HTML — تمام متن بولد (parse_mode=HTML)."""
+    return AIBOT_CAPTION
+
+
+def aibot_caption_plain():
+    """کپشن ساده (بدون HTML) — fallback اگر سرور parse_mode را نپذیرد."""
+    return AIBOT_CAPTION_PLAIN
+
+
+def aibot_inline_keyboard():
+    """۳ دکمهٔ شیشه‌ای: کانال راهنما، سایت خرید، گروه تست."""
+    return {"inline_keyboard": [
+        [
+            {"text": AIBOT_GUIDE_BUTTON_TEXT, "url": CFG["aibot_guide_url"]},
+            {"text": AIBOT_BUY_BUTTON_TEXT, "url": CFG["aibot_buy_url"]},
+        ],
+        [
+            {"text": AIBOT_GROUP_BUTTON_TEXT, "url": CFG["group_url"]},
+        ],
     ]}
-    if GAME_PHOTO.exists():
+
+
+def send_aibot_info(user_id):
+    """«🧠 خرید ربات هوش مصنوعی» -> عکس روباه AI + متن کامل بولد + ۳ دکمهٔ شیشه‌ای.
+
+    ترتیب تلاش: ۱) عکس با کپشن HTML (بولد)  ۲) عکس با کپشن ساده  ۳) پیام متنی
+    """
+    keyboard = aibot_inline_keyboard()
+    if AIBOT_PHOTO.exists():
         try:
-            data = GAME_PHOTO.read_bytes()
+            data = AIBOT_PHOTO.read_bytes()
             fields = [
                 ("chat_id", str(user_id)),
+                ("caption", aibot_caption()),
+                ("parse_mode", "HTML"),
                 ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
             ]
             api_call_multipart(
                 "sendPhoto", fields,
-                [("photo", GAME_PHOTO.name, data, "image/jpeg")],
+                [("photo", AIBOT_PHOTO.name, data, "image/jpeg")],
             )
-            log("info", f"عکس + دکمهٔ سایت بازی ارسال شد — user {user_id}")
+            log("info", f"عکس + ۳ دکمهٔ ربات هوش مصنوعی ارسال شد — user {user_id}")
             return
-        except NetworkError as exc:
-            log("warn", f"sendPhoto سایت بازی ناموفق ({exc}) — ارسال متنی")
         except BotError as exc:
-            log("error", f"sendPhoto سایت بازی خطا داد: {exc} — ارسال متنی")
-    send_with_retry(user_id, GAME_BUTTON_TEXT, reply_markup=keyboard)
+            # احتمالاً parse_mode برای کپشن عکس پشتیبانی نشده — با کپشن ساده
+            log("warn", f"sendPhoto با کپشن HTML رد شد ({exc}) — تلاش با کپشن ساده")
+            try:
+                data = AIBOT_PHOTO.read_bytes()
+                fields = [
+                    ("chat_id", str(user_id)),
+                    ("caption", aibot_caption_plain()),
+                    ("reply_markup", json.dumps(keyboard, ensure_ascii=False)),
+                ]
+                api_call_multipart(
+                    "sendPhoto", fields,
+                    [("photo", AIBOT_PHOTO.name, data, "image/jpeg")],
+                )
+                log("info", f"عکس (کپشن ساده) ربات هوش مصنوعی ارسال شد — user {user_id}")
+                return
+            except (NetworkError, BotError) as exc2:
+                log("error", f"sendPhoto ربات هوش مصنوعی خطا داد: {exc2} — ارسال متنی")
+        except NetworkError as exc:
+            log("warn", f"sendPhoto ربات هوش مصنوعی ناموفق ({exc}) — ارسال متنی")
+    # جایگزین بدون عکس (فایل موجود نیست یا آپلود شکست خورد)
+    send_with_retry(user_id, aibot_caption(), parse_mode="HTML",
+                    reply_markup=keyboard)
+    log("info", f"پیام متنی ربات هوش مصنوعی ارسال شد — user {user_id}")
 
 
 def send_ads_site(user_id):
@@ -1451,7 +1535,7 @@ BOT_COMMANDS = [
     {"command": "app", "description": "🚀 ورود به روباه پلاس (برنامک)"},
     {"command": "menu", "description": "📋 نمایش دوبارهٔ منوی اصلی"},
     {"command": "buy", "description": "💎 خرید / تمدید اشتراک ربات"},
-    {"command": "game", "description": "🎮 سایت بازی روباه"},
+    {"command": "ai", "description": "🧠 خرید ربات هوش مصنوعی"},
     {"command": "ads", "description": "📣 خرید تبلیغات"},
     {"command": "font", "description": "🔤 ساخت فونت"},
     {"command": "guide", "description": "📚 کانال راهنما"},
@@ -1483,8 +1567,8 @@ def handle_slash_command(user_id, text):
         show_main_menu(user_id)
     elif cmd == "/buy":
         handle_menu_text(user_id, MENU_BUY)
-    elif cmd == "/game":
-        send_game_site(user_id)
+    elif cmd == "/ai":
+        send_aibot_info(user_id)
     elif cmd == "/ads":
         send_ads_site(user_id)
     elif cmd == "/font":
@@ -1559,8 +1643,8 @@ def handle_menu_text(user_id, text):
         log("info", f"پیام تمدید ارسال شد — user {user_id}")
     elif text == MENU_DEADLINE:
         send_deadline_site(user_id)
-    elif text == MENU_GAME:
-        send_game_site(user_id)
+    elif text == MENU_AIBOT:
+        send_aibot_info(user_id)
     elif text == MENU_GUIDE:
         send_guide_channel(user_id)
     elif text == MENU_MINIAPP:

@@ -139,7 +139,7 @@ class KeyboardTests(BotTestCase):
         self.assertIn(bot.MENU_DEVBOT, bot.MENU_BUTTONS)
 
     def test_keyboard_version_bumped(self):
-        self.assertEqual(bot.MENU_KEYBOARD_VERSION, 5)
+        self.assertEqual(bot.MENU_KEYBOARD_VERSION, 6)
 
     def test_font_row_now_has_two_buttons(self):
         rows = bot.main_reply_keyboard()["keyboard"]
