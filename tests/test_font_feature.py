@@ -637,7 +637,7 @@ class ExistingFeaturesTests(BotTestCase):
                             for text in self.api.sent_texts()))
 
     def test_unverified_user_is_not_sent_to_font_flow(self):
-        bot.get_user_state(USER_A)   # تایید نشده
+        bot.get_user_state(USER_A)["fresh_start"] = True   # تایید نشده (کاربر تازه که /start زده)
         self.send_text(USER_A, bot.MENU_FONT)
         self.assertNotEqual(bot.get_user_state(USER_A).get("mode"), "font")
         self.assertNotIn(bot.FONT_ASK_TEXT, self.api.sent_texts())

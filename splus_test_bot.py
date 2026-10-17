@@ -114,6 +114,10 @@ MENU_BUTTONS = (
     MENU_AIBOT, MENU_GUIDE, MENU_MINIAPP, MENU_ADS, MENU_FONT,
     MENU_DEVBOT,
 )
+# متن دکمه‌های منوی پایین (فعلی + قدیمی). فقط کاربری این دکمه‌ها را دارد که
+# قبلاً عضویتش تأیید شده بوده؛ پس اگر data/pv_state.json از دست رفت (نصب تازه)،
+# با اولین زدن یکی از این دکمه‌ها خودکار دوباره تأیید می‌شود.
+OLD_MEMBER_BUTTONS = MENU_BUTTONS + ("🎮 سایت بازی روباه",)
 MAIN_MENU_TEXT = "🦊 منوی اصلی AIFox\n\nیکی از گزینه‌های زیر را انتخاب کنید:"
 # نسخهٔ چیدمان منوی reply-keyboard. هر بار دکمه‌ای اضافه/حذف شد این عدد را
 # یک واحد زیاد کنید تا کیبورد کاربران قدیمی هم به‌روز شود (کیبورد reply در
@@ -700,6 +704,12 @@ def get_user_state(user_id):
     if not isinstance(record, dict):
         record = {"verified": False, "mode": "proof"}
         STATE["users"][key] = record
+    # مالک ربات هیچ‌وقت پشت صفحهٔ عضویت قفل نمی‌شود (مثلاً بعد از نصب تازه
+    # روی سرور/ترموکس که data/pv_state.json وجود ندارد)
+    if not record.get("verified") and is_owner(user_id):
+        record["verified"] = True
+        if record.get("mode") == "proof":
+            record["mode"] = "main"
     return record
 
 
@@ -831,8 +841,14 @@ def finish_verification(user_id, user_state):
 
 def handle_unverified_message(message, user_id):
     """کاربر هنوز تایید نشده: فقط با زدن دکمهٔ «تایید عضویت» پیش می‌رود."""
-    get_user_state(user_id)
-    send_with_retry(user_id, click_status_text(None))
+    user_state = get_user_state(user_id)
+    if user_state.get("mode") != "proof":
+        user_state["mode"] = "proof"
+        save_state()
+    # دکمه‌های «کانال روباه» / «گروه روباه» / «تایید عضویت» همراه همین پیام
+    # ارسال می‌شوند؛ قبلاً فقط متن بدون دکمه می‌رفت و کاربر گیر می‌کرد.
+    send_with_retry(user_id, click_status_text(user_state),
+                    reply_markup=start_inline_keyboard())
 
 
 def handle_verify_callback(callback):
@@ -2122,6 +2138,7 @@ def handle_update(update):
             show_main_menu(user_id)
         else:
             user_state["mode"] = "proof"
+            user_state["fresh_start"] = True
             save_state()
             send_start_page(user_id)
         return
@@ -2201,6 +2218,17 @@ def handle_update(update):
         except (NetworkError, BotError) as exc:
             log("error", f"خطا در ثبت گزارش: {exc}")
         return
+
+    # کاربر قدیمی (کیبورد منو را از قبل دارد) ولی وضعیتش پاک شده → تأیید خودکار
+    # (کاربر تازه‌ای که در این نصب /start زده «fresh_start» دارد و باید
+    # خودش «تایید عضویت» را بزند)
+    if (not user_state.get("verified") and text in OLD_MEMBER_BUTTONS
+            and not user_state.get("fresh_start")):
+        user_state["verified"] = True
+        user_state["mode"] = "main"
+        user_state["auto_restored"] = True
+        save_state()
+        log("info", f"کاربر قدیمی {user_id} با دکمهٔ منو خودکار تأیید شد")
 
     if not user_state.get("verified"):
         try:

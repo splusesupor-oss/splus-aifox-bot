@@ -287,10 +287,24 @@ class SendFlowTests(BotTestCase):
         self.assertNotIn("<b>", photos[1]["caption"])
 
     def test_unverified_user_does_not_get_aibot_info(self):
-        bot.get_user_state(USER_A)   # not verified
+        bot.get_user_state(USER_A)["fresh_start"] = True   # not verified (کاربر تازه که /start زده)
         self.send_text(USER_A, bot.MENU_AIBOT)
         self.assertEqual(self.photo_calls(), [])
         self.assertIn("تایید عضویت", self.api.last_sent()["text"])
+
+    def test_old_member_with_lost_state_is_auto_restored(self):
+        # data/pv_state.json پاک شده؛ کاربر قدیمی هنوز کیبورد منو را دارد
+        self.send_text(USER_A, bot.MENU_AIBOT)
+        self.assertTrue(bot.get_user_state(USER_A)["verified"])
+        self.assertEqual(len(self.photo_calls()), 1)
+
+    def test_unverified_text_message_has_join_buttons(self):
+        bot.get_user_state(USER_A)["fresh_start"] = True
+        self.send_text(USER_A, "سلام")
+        markup = self.api.last_sent().get("reply_markup")
+        self.assertIn("کانال روباه", str(markup))
+        self.assertIn("گروه روباه", str(markup))
+        self.assertIn(bot.VERIFY_CALLBACK, str(markup))
 
     def test_font_mode_escape_to_aibot(self):
         self.make_verified(USER_A)

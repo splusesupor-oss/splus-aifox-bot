@@ -248,7 +248,7 @@ class SendFlowTests(BotTestCase):
         self.assertIn(GROUP_URL, photos[1]["caption"])
 
     def test_unverified_user_does_not_get_devbot_info(self):
-        bot.get_user_state(USER_A)   # تایید نشده
+        bot.get_user_state(USER_A)["fresh_start"] = True   # تایید نشده (کاربر تازه که /start زده)
         self.send_text(USER_A, bot.MENU_DEVBOT)
         self.assertEqual(self.photo_calls(), [])
         self.assertNotEqual(bot.get_user_state(USER_A).get("mode"), "main")
